@@ -1,0 +1,1 @@
+/usr/bin/cc   -rdynamic CMakeFiles/subscriber_mmap.dir/subscriber_mmap.c.o  -o subscriber_mmap  -lpthread -lhal -liec61850 
