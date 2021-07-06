@@ -34,6 +34,7 @@ include_directories(
 
 set(subscriber_mmap_SRCS
    subscriber_mmap.c
+   cfg_parse.c
 )
 
 

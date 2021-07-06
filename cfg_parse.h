@@ -38,4 +38,8 @@ int cfg_get_int(struct cfg_struct *, const char *, int *);
    WARNING: this function allocated memory with malloc for the result */
 int cfg_get_string(struct cfg_struct *, const char *, char **);
 
+int cfg_get_hex(struct cfg_struct *config, const char * key, short unsigned int *value);
+
+int cfg_get_mac(struct cfg_struct *config, const char * key, unsigned char *MAC);
+
 #endif

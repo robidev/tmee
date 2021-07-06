@@ -33,6 +33,7 @@ include_directories(
 #SET(CMAKE_EXE_LINKER_FLAGS "-static")   
 
 set(publisher_mmap_SRCS
+   cfg_parse.c
    publisher_mmap.c
 )
 

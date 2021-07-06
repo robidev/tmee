@@ -289,3 +289,57 @@ int cfg_get_string(struct cfg_struct *config, const char * key, char **value)
   }
   return 0;
 }
+
+int cfg_get_hex(struct cfg_struct *config, const char * key, short unsigned int *value)
+{
+  if(value == NULL)
+  {
+    printf("ERROR: value should be pointer\n");
+    return -1;
+  }
+  const char *value_i = cfg_get(config, key);
+  if(value_i == NULL)
+  {
+    printf("ERROR: could not find %s value in config file\n", key);
+    return -1;
+  }
+  unsigned int temp_value;
+  if(sscanf(value_i, "0x%x", &temp_value) != 1)
+  {
+    printf("ERROR: could not parse %s value: %s\n", key, cfg_get(config, key));
+    return -1;
+  }
+  *value = (short unsigned int)temp_value;
+  return 0;
+}
+
+int cfg_get_mac(struct cfg_struct *config, const char * key, unsigned char *MAC)
+{
+  if(MAC == NULL)
+  {
+    printf("ERROR: value should not be NULL\n");
+    return -1;
+  }
+  const char *value_i = cfg_get(config, key);
+  if(value_i == NULL)
+  {
+    printf("ERROR: could not find %s value in config file\n", key);
+    return -1;
+  }
+
+  int values[6];
+  if( 6 == sscanf( value_i, "\"%x:%x:%x:%x:%x:%x%*c[^\"]\"",
+      &values[0], &values[1], &values[2],
+      &values[3], &values[4], &values[5] ) )
+  {
+      /* convert to uint8_t */
+      for(int i = 0; i < 6; ++i )
+          MAC[i] = (unsigned char) values[i];
+  }
+  else
+  {
+      printf("ERROR: coud not parse mac. value: %s, please use format \"aa:bb:cc:dd:ee:ff\"\n",cfg_get(config, key));/* invalid mac */
+      return -1;
+  }
+  return 0;
+}

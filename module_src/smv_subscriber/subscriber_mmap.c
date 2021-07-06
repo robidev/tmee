@@ -1,7 +1,11 @@
-#include <hal_thread.h>
+#include <libiec61850/hal_thread.h>
+#include <libiec61850/sv_subscriber.h>
+#include "../../module_interface.h"
+#include "../../cfg_parse.h"
+
 #include <signal.h>
 #include <stdio.h>
-#include <sv_subscriber.h>
+#include <stdlib.h>
 
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -12,56 +16,197 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-static bool running = true;
 
-void sigint_handler(int signalId)
-{
-    running = 0;
-}
+struct module_private_data {
+    int sample_received_id;
+    SVReceiver receiver;
+    SVSubscriber subscriber;
+    module_callbacks *callbacks;
 
-uint32_t item_size = 0;
-uint32_t max_items = 4000;
-uint32_t buffer_index = -1;
-uint32_t * buffer;
-int fd = 0;
-int fd_config = 0;
+    uint32_t item_size;
+    uint32_t max_items;
+    uint32_t buffer_index;
+    uint32_t * buffer;
+    uint32_t buffer_size;
+    int fd;
+    int fd_config;
 
-typedef void (*cb_t)(void *userdata);
-
-struct callback_struct {
-    cb_t callback;
-    struct callback_struct *next;
+    char * interface;
+    char * shm_name;
+    unsigned short appid;
+    unsigned char * dstMac;
+    uint8_t MAC[6];
 };
 
-struct callback_struct *callback_list;
+const char event_id[] = "SAMPLE_RECEIVED";
+
+static void
+svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU asdu);
+
+int pre_init(module_object *instance, module_callbacks *callbacks)
+{
+    printf("pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
+
+    //allocate module data
+    struct module_private_data * data = malloc(sizeof(struct module_private_data));
+    data->item_size = 0;
+    data->max_items = 4000;
+    data->buffer_index = -1;
+    data->fd = 0;
+    data->fd_config = 0;
+
+    data->interface = 0;
+    data->shm_name = 0;
+    data->appid = 0x4000;
+    data->dstMac = NULL;
+
+    struct cfg_struct *config = cfg_init();
+    if(cfg_load(config, instance->config_file) != 0)
+    {
+        printf("ERROR: could not load config file: %s\n", instance->config_file);
+        return -1;
+    }
+
+    if(cfg_get_string(config, "interface", &data->interface) != 0) { return -1; }
+    printf("Set interface id: %s\n", data->interface);
+
+    if(cfg_get_hex(config, "appid", &data->appid) != 0) { return -1; }
+    printf("appid: 0x%.4x\n", data->appid);
+
+    if(cfg_get_mac(config, "dstmac", data->MAC) != 0) 
+    { 
+        printf("no mac address set\n");
+        data->dstMac = NULL;
+    }
+    else
+    {
+        printf("mac address is: %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",data->MAC[0],data->MAC[1],data->MAC[2],data->MAC[3],data->MAC[4],data->MAC[5]);
+        data->dstMac = data->MAC;
+    }
+
+    if(cfg_get_string(config, "output_file", &data->shm_name) != 0) { return -1; }
+    printf("output shm name: %s\n", data->shm_name);
+
+    //create/mmap output files
+    data->fd = open(data->shm_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
+    if (data->fd < 0)
+    {
+        perror("open");
+        return -10;
+    }
+    uint8_t file_name_buf[256];
+    sprintf(file_name_buf, "%s_config", data->shm_name);
+    printf("shm config name: %s\n", file_name_buf);
+    data->fd_config = open(file_name_buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
+    if (data->fd_config == -1)
+    {
+        perror("open");
+        return -11;
+    }
+
+    //register SAMPLE_RECEIVED event
+    int len = strlen(instance->config_id) + strlen(event_id) + 10;
+    char event_string[len]; 
+    sprintf(event_string, "%s_%s",instance->config_id, event_id);
+    data->sample_received_id = callbacks->register_event_cb(event_string);
+
+    data->callbacks = callbacks;
+    //store module data in pointer
+    instance->module_data = data;
+    return 0;
+}
+
+int init(module_object *instance, module_callbacks *callbacks)
+{
+    printf("init\n");
+    struct module_private_data * data = instance->module_data;
+
+    uint8_t bb[1024] = "";
+    data->receiver = SVReceiver_create();
+
+    SVReceiver_setInterfaceId(data->receiver, data->interface);
+
+    sprintf(bb, "eth=%s\nshm name=%s\n",data->interface, data->shm_name);
+    write(data->fd_config, bb, strlen(bb));    
+
+    if( data->dstMac != NULL)
+    {
+        sprintf(bb, "mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",data->MAC[0],data->MAC[1],data->MAC[2],data->MAC[3],data->MAC[4],data->MAC[5]);
+        write(data->fd_config, bb, strlen(bb)); 
+    }
+    sprintf(bb, "appid=%.4x\n",data->appid);
+    write(data->fd_config, bb, strlen(bb));  
+
+    /* Create a subscriber listening to SV messages with APPID 0x-xxxx */
+    data->subscriber = SVSubscriber_create(data->dstMac, data->appid);
+
+    /* Install a callback handler for the subscriber */
+    SVSubscriber_setListener(data->subscriber, svUpdateListener, instance);
+
+    /* Connect the subscriber to the receiver */
+    SVReceiver_addSubscriber(data->receiver, data->subscriber);
+
+    /* Start listening to SV messages - starts a new receiver background thread */
+    SVReceiver_start(data->receiver);
+
+    return 0;
+}
+
+
+int deinit(module_object *instance)
+{
+    printf("deinit\n");
+    struct module_private_data * data = instance->module_data;
+
+    /* Stop listening to SV messages */
+    SVReceiver_stop(data->receiver);
+
+    /* Cleanup and free resources */
+    SVReceiver_destroy(data->receiver);
+
+    close(data->fd);
+    close(data->fd_config);
+
+    munmap(data->buffer, data->buffer_size);
+
+    free(data->interface);
+    free(data->shm_name);
+
+    free(data);
+    return 0;
+}
+
 
 
 /* Callback handler for received SV messages */
 static void
 svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU asdu)
 {
-    uint32_t data_size = SVSubscriber_ASDU_getDataSize(asdu);
-    if(unlikely( item_size == 0 ) && data_size > 0)//init 
-    {
-	item_size = data_size;
-        uint32_t buffer_size = ( ( item_size + 4 ) * max_items) + 16;
+    module_object *instance = parameter;
+    struct module_private_data * data = instance->module_data;
 
-        if(ftruncate(fd, buffer_size) != 0)
-	{
+    uint32_t data_size = SVSubscriber_ASDU_getDataSize(asdu);
+    if(unlikely( data->item_size == 0 ) && data_size > 0)//init 
+    {
+	    data->item_size = data_size;
+        data->buffer_size = ( ( data->item_size + 4 ) * data->max_items) + 16;
+
+        if(ftruncate(data->fd, data->buffer_size) != 0)
+        {
             printf("ftruncate issue\n");
             exit(30);
-	}
-	// map shared memory to process address space
-	buffer = (uint32_t*)mmap(NULL, buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (buffer == MAP_FAILED)
-	{
+        }
+        // map shared memory to process address space
+        data->buffer = (uint32_t*)mmap(NULL, data->buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, data->fd, 0);
+        if (data->buffer == MAP_FAILED)
+        {
             printf("mmap issue:\n");
             perror("mmap");
             exit(40);
-	}
-        *buffer = item_size;
-        *(buffer + 1) = max_items;
-        *(buffer + 2) = 0;
+        }
+        *data->buffer = data->item_size;
+        *(data->buffer + 1) = data->max_items;
+        *(data->buffer + 2) = 0;
 
         //additional data
         const char* svID = SVSubscriber_ASDU_getSvId(asdu);
@@ -69,173 +214,40 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
         {
             printf("svID=%s\n", svID);
             uint8_t bb[1024] = "";
-            sprintf(bb, "svID=%s\npacket size=%u\nitems:%u\n",svID, item_size, max_items);
-            write(fd_config, bb, strlen(bb));
+            sprintf(bb, "svID=%s\npacket size=%u\nitems:%u\n",svID, data->item_size, data->max_items);
+            write(data->fd_config, bb, strlen(bb));
         }
 
     }
-    if(item_size != data_size)
+    if(data->item_size != data_size)
     {
         printf("packet size mismatch\n");
         return;//only skip this packet
     }
-    uint32_t item_size_int = item_size / 4;
+    uint32_t item_size_int = data->item_size / 4;
 
-    buffer_index = (buffer_index + 1) % max_items;
+    data->buffer_index = (data->buffer_index + 1) % data->max_items;
 
-    printf("buffer index: %u\n", buffer_index);
+    printf("buffer index: %u\n", data->buffer_index);
     for(uint32_t i = 0; i < item_size_int; i += 1)
     {
-        *( (buffer + 4) + (buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);
+        *( (data->buffer + 4) + (data->buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);
     }
-    *( (buffer + 4) + (buffer_index * (item_size_int + 1)) + item_size_int) = SVSubscriber_ASDU_getSmpCnt(asdu);
+    *( (data->buffer + 4) + (data->buffer_index * (item_size_int + 1)) + item_size_int) = SVSubscriber_ASDU_getSmpCnt(asdu);
     //update the buffer index
-    *(buffer + 2) = buffer_index;
+    *(data->buffer + 2) = data->buffer_index;
    
     //call all registered callbacks
-    struct callback_struct *callbacks = callback_list;
-
-    while(callbacks != NULL)
-    {
-        callbacks->callback(parameter);
-        callbacks = callbacks->next;
-    }
+    data->callbacks->callback_event_cb(data->sample_received_id);
 }
 
-int register_callback(cb_t func)
+int run(module_object *instance)
 {
-    struct callback_struct *current_node = callback_list;
-    
-    while(current_node != NULL && current_node->next != NULL) // find last valid entry
-    {
-        current_node = current_node->next;
-    }
-        
-    struct callback_struct *new_node = (struct callback_struct*) malloc(sizeof(struct callback_struct));
-    new_node->callback = func;
-    new_node->next = NULL;  
- 
-    if(current_node != NULL)
-    {
-        current_node->next = new_node;
-    }
-    else
-    {
-        callback_list = new_node;
-    }
+    Thread_sleep(1);
+    return 0;
 }
 
-
-int
-main(int argc, char** argv)
+int main()
 {
-    unsigned char * shm_name = "/dev/shm/iec61850-9-2";
-    unsigned short appid = 0x4000;
-    unsigned char * dstMac = NULL;
-    uint8_t MAC[6];
-    uint8_t bb[1024] = "";
-
-
-    SVReceiver receiver = SVReceiver_create();
-
-    if (argc > 1) {
-        SVReceiver_setInterfaceId(receiver, argv[1]);
-		printf("Set interface id: %s\n", argv[1]);
-    }
-    else {
-        printf("Using interface eth0\n");
-        SVReceiver_setInterfaceId(receiver, "eth0");
-    }
-
-    if(argc > 2)
-    {
-        shm_name = argv[2];
-    }
-    printf("shm name: %s\n", shm_name);
-    fd = open(shm_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
-    if (fd < 0)
-    {
-        perror("open");
-        return 10;
-    }
-
-    uint8_t file_name_buf[256];
-    sprintf(file_name_buf, "%s_config", shm_name);
-    printf("shm config name: %s\n", file_name_buf);
-    fd_config = open(file_name_buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
-
-    if (fd_config == -1)
-    {
-        perror("open");
-        return 11;
-    }
-
-    sprintf(bb, "eth=%s\nshm name=%s\n",argv[1], shm_name);
-    write(fd_config, bb, strlen(bb));    
-
-    
-    if (argc > 3) {
-        appid = (unsigned short)strtoul(argv[3], NULL, 16);
-    }
-    printf("appid: 0x%.4x\n", appid);
-
-    if (argc > 4) {
-        int values[6];
-        if( 6 == sscanf( argv[4], "%x:%x:%x:%x:%x:%x%*c",
-            &values[0], &values[1], &values[2],
-            &values[3], &values[4], &values[5] ) )
-        {
-            /* convert to uint8_t */
-            for(int i = 0; i < 6; ++i )
-                MAC[i] = (uint8_t) values[i];
-        }
-        else
-        {
-            printf("coud not parse mac. pleae use format 'aa:bb:cc:dd:ee:ff'\n");/* invalid mac */
-            return -1;
-        }
-        dstMac = MAC;
-    }
-    if( dstMac == NULL)
-    {
-        printf("no mac address set\n");
-    }
-    else
-    {
-        printf("mac address is: %.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",MAC[0],MAC[1],MAC[2],MAC[3],MAC[4],MAC[5]);
-        sprintf(bb, "mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\nappid=%.4x\n",MAC[0],MAC[1],MAC[2],MAC[3],MAC[4],MAC[5], appid);
-        write(fd_config, bb, strlen(bb));  
-    }
-
-    
-    callback_list = NULL;
-
-    /* Create a subscriber listening to SV messages with APPID 4000h */
-    SVSubscriber subscriber = SVSubscriber_create(dstMac, appid);
-
-    /* Install a callback handler for the subscriber */
-    SVSubscriber_setListener(subscriber, svUpdateListener, NULL);
-
-    /* Connect the subscriber to the receiver */
-    SVReceiver_addSubscriber(receiver, subscriber);
-
-    /* Start listening to SV messages - starts a new receiver background thread */
-    SVReceiver_start(receiver);
-
-    if (SVReceiver_isRunning(receiver)) {
-        signal(SIGINT, sigint_handler);
-
-        while (running)
-            Thread_sleep(1);
-
-        /* Stop listening to SV messages */
-        SVReceiver_stop(receiver);
-    }
-    else {
-        printf("Failed to start SV subscriber. Reason can be that the Ethernet interface doesn't exist or root permission are required.\n");
-    }
-
-    /* Cleanup and free resources */
-    SVReceiver_destroy(receiver);
     return 0;
 }
