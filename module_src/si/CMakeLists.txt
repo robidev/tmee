@@ -7,7 +7,7 @@ if(DEFINED ENV{TOOLCHAIN})
     set(CMAKE_AR	"$ENV{TOOLCHAIN}ar" CACHE FILEPATH "CW archiver" FORCE)
 endif()
 
-project(subscriber_mmap)
+project(standard_inverse_protection)
 
 ENABLE_TESTING()
 
@@ -28,35 +28,31 @@ test_big_endian(PLATFORM_IS_BIGENDIAN)
 #include(GNUInstallDirs)
 
 include_directories(
-    /usr/local/include/libiec61850/
 )
 
 
 #SET(CMAKE_EXE_LINKER_FLAGS "-static")   
 
-set(subscriber_mmap_SRCS
-   subscriber_mmap.c
+set(standard_inverse_protection_SRCS
+   si.c
    cfg_parse.c
 )
 
-add_library(smv92 SHARED
-  ${subscriber_mmap_SRCS}
+add_library(SI SHARED
+  ${standard_inverse_protection_SRCS}
 )
 
-set_target_properties(smv92 PROPERTIES VERSION ${PROJECT_VERSION})
-#set_target_properties(smv92 PROPERTIES PUBLIC_HEADER ../../module_interface.h)
+set_target_properties(SI PROPERTIES VERSION ${PROJECT_VERSION})
+#set_target_properties(SI PROPERTIES PUBLIC_HEADER ../../module_interface.h)
 
 
-#add_executable(subscriber_mmap
-#  ${subscriber_mmap_SRCS}
+#add_executable(SI
+#  ${standard_inverse_protection_SRCS}
 #)
 
-target_link_libraries (smv92
-  pthread
-  hal
-  iec61850
+target_link_libraries (SI
 )
 
-install(TARGETS smv92
+install(TARGETS SI
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

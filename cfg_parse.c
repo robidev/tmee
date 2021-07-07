@@ -332,8 +332,9 @@ int cfg_get_mac(struct cfg_struct *config, const char * key, unsigned char *MAC)
       &values[0], &values[1], &values[2],
       &values[3], &values[4], &values[5] ) )
   {
+    int i;
       /* convert to uint8_t */
-      for(int i = 0; i < 6; ++i )
+      for(i = 0; i < 6; ++i )
           MAC[i] = (unsigned char) values[i];
   }
   else

@@ -1,0 +1,1 @@
+Module to connect ipc triggers/signals

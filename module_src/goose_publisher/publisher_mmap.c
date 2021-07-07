@@ -1,3 +1,8 @@
+#include "libiec61850/mms_value.h"
+#include "libiec61850/goose_publisher.h"
+#include "libiec61850/hal_thread.h"
+#include "../../cfg_parse.h"
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -9,18 +14,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
-#include "cfg_parse.h"
 
-#include <hal_thread.h>
-#include <mms_value.h>
-#include <goose_publisher.h>
+
 
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-int stNum
-int sqNum
-int restransmit-time
+int stNum;
+int sqNum;
+int restransmit_time;
 
 void updateElement(int index, void * value)
 {
@@ -37,9 +39,9 @@ void TriggerRestransmit()
 
 void slowRetransmit()
 {
-    send goose
-    if retransmit-time < max, double it
-    if retransmit-time > max; retransmit-time = max;
+    //send goose
+    //if retransmit-time < max, double it
+    //if retransmit-time > max; retransmit-time = max;
 }
 
 void sendGoose()

@@ -147,8 +147,29 @@ int init(module_object *instance, module_callbacks *callbacks)
     SVReceiver_addSubscriber(data->receiver, data->subscriber);
 
     /* Start listening to SV messages - starts a new receiver background thread */
-    SVReceiver_start(data->receiver);
+    //SVReceiver_start(data->receiver);
+    if(SVReceiver_startThreadless(data->receiver) == NULL)
+    {
+         printf("ERROR: Starting SV receiver failed for interface %s\n", data->interface);
+    }
+    return 0;
+}
 
+int run(module_object *instance)
+{
+    struct module_private_data * data = instance->module_data;
+    SVReceiver_tick(data->receiver);
+    return 0;
+}
+
+int event(module_object *instance, int event_id)
+{
+    return 0;
+}
+
+//called to generate real-time performance metrics on this machine
+int test(void)
+{
     return 0;
 }
 
@@ -159,7 +180,8 @@ int deinit(module_object *instance)
     struct module_private_data * data = instance->module_data;
 
     /* Stop listening to SV messages */
-    SVReceiver_stop(data->receiver);
+    //SVReceiver_stop(data->receiver);
+    SVReceiver_stopThreadless(data->receiver);
 
     /* Cleanup and free resources */
     SVReceiver_destroy(data->receiver);
@@ -239,12 +261,6 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
    
     //call all registered callbacks
     data->callbacks->callback_event_cb(data->sample_received_id);
-}
-
-int run(module_object *instance)
-{
-    Thread_sleep(1);
-    return 0;
 }
 
 int main()
