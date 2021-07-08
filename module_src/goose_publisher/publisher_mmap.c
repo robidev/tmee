@@ -49,10 +49,11 @@ void sendGoose()
 }
 
 
-// file called buffer
+// file buffer
 //  - size per item
 //  - maxitems
 //  - index, incremented for transmission, after write
+//  - semaphore + type
 //  - array
 
 

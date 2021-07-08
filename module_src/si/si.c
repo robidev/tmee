@@ -1,5 +1,7 @@
 #include "../../module_interface.h"
 #include "../../cfg_parse.h"
+#include "../../types.h"
+#include "../../mem_file.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -27,7 +29,7 @@ struct module_private_data {
     unsigned int item_size;
     unsigned int max_items;
     unsigned int buffer_index;
-    unsigned int * buffer;
+    unsigned char * buffer;
     unsigned int buffer_size;
     int fd;
     int fd_config;
@@ -43,7 +45,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
     data->item_size = 0;
-    data->max_items = 4000;
+    data->max_items = 10;//TODO: make it a setting
     data->buffer_index = -1;
     data->fd = 0;
     data->fd_config = 0;
@@ -101,6 +103,17 @@ int init(module_object *instance, module_callbacks *callbacks)
 {
     printf("init\n");
     struct module_private_data * data = instance->module_data;
+
+    data->item_size = type_to_item_size(BOOL);
+    data->buffer_size = calculate_buffer_size(data->item_size, data->max_items);
+
+    data->buffer = mmap_fd(data->fd, data->buffer_size);
+
+    write_type(data->buffer, BOOL);
+    write_size(data->buffer,data->buffer_size);
+    write_items(data->buffer,data->max_items);
+    write_index(data->buffer,0);
+
     return 0;
 }
 
@@ -119,8 +132,10 @@ int event(module_object *instance, int event_id)
     // process new data
     // filter harmonics from samples
     // test for trip conditions
+    
+    // write trip data
+    write_output_bool(data->buffer,1);
     //call all registered callbacks
-
     data->callbacks->callback_event_cb(data->trip_value_changed_id);
     return 0;
 }
@@ -151,7 +166,4 @@ int deinit(module_object *instance)
     return 0;
 }
 
-int main()
-{
-    return 0;
-}
+

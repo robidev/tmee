@@ -12,9 +12,16 @@
 #include <unistd.h>
 #include <string.h>
 
-
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
+
+/*              size    value
+item_size       4       64(8x int+q ) + 4(SmpCnt) = 68
+max_items       4       4000
+index           4       0
+semaphore+type  4       0/1 + smv
+buffer[]        68*4000 [data_items+smpcnt]
+*/
 
 
 struct module_private_data {
@@ -164,12 +171,14 @@ int run(module_object *instance)
 
 int event(module_object *instance, int event_id)
 {
+    printf("smv event id: %i\n", event_id);
     return 0;
 }
 
 //called to generate real-time performance metrics on this machine
 int test(void)
 {
+    printf("smv test\n");
     return 0;
 }
 
@@ -263,7 +272,4 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
     data->callbacks->callback_event_cb(data->sample_received_id);
 }
 
-int main()
-{
-    return 0;
-}
+
