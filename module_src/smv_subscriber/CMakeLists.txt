@@ -37,6 +37,7 @@ include_directories(
 set(subscriber_mmap_SRCS
    subscriber_mmap.c
    cfg_parse.c
+   mem_file.c
 )
 
 add_library(smv92 SHARED

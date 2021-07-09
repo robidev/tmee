@@ -1,7 +1,9 @@
 #include <libiec61850/hal_thread.h>
 #include <libiec61850/sv_subscriber.h>
 #include "../../module_interface.h"
-#include "../../cfg_parse.h"
+#include "cfg_parse.h"
+#include "types.h"
+#include "mem_file.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -33,8 +35,8 @@ struct module_private_data {
     uint32_t item_size;
     uint32_t max_items;
     uint32_t buffer_index;
-    uint32_t * buffer;
-    uint32_t buffer_size;
+    char * output_buffer;
+    uint32_t output_buffer_size;
     int fd;
     int fd_config;
 
@@ -52,12 +54,12 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
 
 int pre_init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
+    printf("smv pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
 
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
     data->item_size = 0;
-    data->max_items = 4000;
+    data->max_items = 0;
     data->buffer_index = -1;
     data->fd = 0;
     data->fd_config = 0;
@@ -74,6 +76,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
         return -1;
     }
 
+    if(cfg_get_int(config,"max_items",&data->max_items) != 0) { return -1; }
+    
     if(cfg_get_string(config, "interface", &data->interface) != 0) { return -1; }
     printf("Set interface id: %s\n", data->interface);
 
@@ -125,9 +129,21 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
 int init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("init\n");
+    printf("smv init\n");
     struct module_private_data * data = instance->module_data;
 
+    //allocate mmaped buffer
+    data->item_size = type_to_item_size(SMV92);
+    data->output_buffer_size = calculate_buffer_size(data->item_size + 4, data->max_items);
+
+    data->output_buffer = mmap_fd(data->fd, data->output_buffer_size);
+
+    write_type(data->output_buffer, SMV92);
+    write_size(data->output_buffer,data->item_size);
+    write_items(data->output_buffer,data->max_items);
+    write_index(data->output_buffer,0);
+
+    //initialise receiver
     uint8_t bb[1024] = "";
     data->receiver = SVReceiver_create();
 
@@ -165,7 +181,7 @@ int init(module_object *instance, module_callbacks *callbacks)
 int run(module_object *instance)
 {
     struct module_private_data * data = instance->module_data;
-    SVReceiver_tick(data->receiver);
+    //SVReceiver_tick(data->receiver);
     return 0;
 }
 
@@ -185,7 +201,7 @@ int test(void)
 
 int deinit(module_object *instance)
 {
-    printf("deinit\n");
+    printf("smv deinit\n");
     struct module_private_data * data = instance->module_data;
 
     /* Stop listening to SV messages */
@@ -198,7 +214,7 @@ int deinit(module_object *instance)
     close(data->fd);
     close(data->fd_config);
 
-    munmap(data->buffer, data->buffer_size);
+    munmap(data->output_buffer, data->output_buffer_size);
 
     free(data->interface);
     free(data->shm_name);
@@ -217,39 +233,7 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
     struct module_private_data * data = instance->module_data;
 
     uint32_t data_size = SVSubscriber_ASDU_getDataSize(asdu);
-    if(unlikely( data->item_size == 0 ) && data_size > 0)//init 
-    {
-	    data->item_size = data_size;
-        data->buffer_size = ( ( data->item_size + 4 ) * data->max_items) + 16;
 
-        if(ftruncate(data->fd, data->buffer_size) != 0)
-        {
-            printf("ftruncate issue\n");
-            exit(30);
-        }
-        // map shared memory to process address space
-        data->buffer = (uint32_t*)mmap(NULL, data->buffer_size, PROT_READ | PROT_WRITE, MAP_SHARED, data->fd, 0);
-        if (data->buffer == MAP_FAILED)
-        {
-            printf("mmap issue:\n");
-            perror("mmap");
-            exit(40);
-        }
-        *data->buffer = data->item_size;
-        *(data->buffer + 1) = data->max_items;
-        *(data->buffer + 2) = 0;
-
-        //additional data
-        const char* svID = SVSubscriber_ASDU_getSvId(asdu);
-        if (svID != NULL)
-        {
-            printf("svID=%s\n", svID);
-            uint8_t bb[1024] = "";
-            sprintf(bb, "svID=%s\npacket size=%u\nitems:%u\n",svID, data->item_size, data->max_items);
-            write(data->fd_config, bb, strlen(bb));
-        }
-
-    }
     if(data->item_size != data_size)
     {
         printf("packet size mismatch\n");
@@ -259,14 +243,14 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
 
     data->buffer_index = (data->buffer_index + 1) % data->max_items;
 
-    printf("buffer index: %u\n", data->buffer_index);
+    printf("output_buffer index: %u\n", data->buffer_index);
     for(uint32_t i = 0; i < item_size_int; i += 1)
     {
-        *( (data->buffer + 4) + (data->buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);
+        *( (data->output_buffer + 4) + (data->buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);
     }
-    *( (data->buffer + 4) + (data->buffer_index * (item_size_int + 1)) + item_size_int) = SVSubscriber_ASDU_getSmpCnt(asdu);
-    //update the buffer index
-    *(data->buffer + 2) = data->buffer_index;
+    *( (data->output_buffer + 4) + (data->buffer_index * (item_size_int + 1)) + item_size_int) = SVSubscriber_ASDU_getSmpCnt(asdu);
+    //update the output_buffer index
+    *(data->output_buffer + 2) = data->buffer_index;
    
     //call all registered callbacks
     data->callbacks->callback_event_cb(data->sample_received_id);

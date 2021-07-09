@@ -36,6 +36,7 @@ include_directories(
 set(standard_inverse_protection_SRCS
    si.c
    cfg_parse.c
+   mem_file.c
 )
 
 add_library(SI SHARED

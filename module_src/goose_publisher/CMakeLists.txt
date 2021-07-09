@@ -25,6 +25,8 @@ check_library_exists(rt clock_gettime "time.h" CONFIG_SYSTEM_HAS_CLOCK_GETTIME)
 include (TestBigEndian)
 test_big_endian(PLATFORM_IS_BIGENDIAN)
 
+#include(GNUInstallDirs)
+
 include_directories(
     /usr/local/include/libiec61850/
 )
@@ -34,17 +36,30 @@ include_directories(
 
 set(publisher_mmap_SRCS
    cfg_parse.c
+   mem_file.c
    publisher_mmap.c
 )
 
 
 
-add_executable(publisher_mmap
+add_library(GOOSE SHARED
   ${publisher_mmap_SRCS}
 )
-target_link_libraries (publisher_mmap
+
+set_target_properties(GOOSE PROPERTIES VERSION ${PROJECT_VERSION})
+#set_target_properties(GOOSE PROPERTIES PUBLIC_HEADER ../../module_interface.h)
+
+
+#add_executable( publisher_mmap
+#  ${publisher_mmap_SRCS}
+#)
+
+target_link_libraries (GOOSE
   pthread
   hal
   iec61850
 )
 
+install(TARGETS GOOSE
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

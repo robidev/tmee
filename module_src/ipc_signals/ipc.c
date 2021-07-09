@@ -1,5 +1,5 @@
 #include "../../module_interface.h"
-#include "../../cfg_parse.h"
+#include "cfg_parse.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -26,7 +26,7 @@ struct module_private_data {
     unsigned int max_items;
     unsigned int buffer_index;
     unsigned int * buffer;
-    unsigned int buffer_size;
+    unsigned int output_buffer_size;
     int fd;
     int fd_config;
 
@@ -132,7 +132,7 @@ int deinit(module_object *instance)
     close(data->fd);
     close(data->fd_config);
 
-    munmap(data->buffer, data->buffer_size);
+    munmap(data->buffer, data->output_buffer_size);
 
     free(data->input_file);
     free(data->output_file);

@@ -1,7 +1,7 @@
 #include "../../module_interface.h"
-#include "../../cfg_parse.h"
-#include "../../types.h"
-#include "../../mem_file.h"
+#include "cfg_parse.h"
+#include "types.h"
+#include "mem_file.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -29,10 +29,14 @@ struct module_private_data {
     unsigned int item_size;
     unsigned int max_items;
     unsigned int buffer_index;
-    unsigned char * buffer;
-    unsigned int buffer_size;
+    unsigned char * input_buffer;
+    unsigned int input_buffer_size;
+    unsigned char * output_buffer;
+    unsigned int output_buffer_size;
+    int in;
     int fd;
     int fd_config;
+    int old_index;
 
 };
 
@@ -40,13 +44,14 @@ const char event_id[] = "TRIP_VALUE_CHANGE";
 
 int pre_init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
+    printf("pre-init SI id: %s, config: %s\n", instance->config_id, instance->config_file);
 
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
     data->item_size = 0;
     data->max_items = 10;//TODO: make it a setting
     data->buffer_index = -1;
+    data->in = 0;
     data->fd = 0;
     data->fd_config = 0;
 
@@ -66,11 +71,19 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     if(cfg_get_string(config, "input_file", &data->input_file) != 0) { return -1; }
     printf("Set input_file: %s\n", data->input_file);
+    //mmap input file
+    data->in = open(data->input_file, O_RDWR, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
+    if (data->in < 0)
+    {
+        perror("open");
+        return -10;
+    }
+
 
     if(cfg_get_string(config, "output_file", &data->output_file) != 0) { return -1; }
     printf("Set output_file: %s\n", data->output_file);
 
-    //create/mmap output files
+    //create/mmap output file
     data->fd = open(data->output_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
     if (data->fd < 0)
     {
@@ -101,26 +114,32 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
 int init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("init\n");
+    printf("init SI\n");
     struct module_private_data * data = instance->module_data;
 
+    //map input file
+    data->input_buffer_size = calculate_buffer_size_from_file(data->in);
+    data->input_buffer = mmap_fd(data->in, data->input_buffer_size);
+    data->old_index = read_index(data->input_buffer);
+
+    //map output file
     data->item_size = type_to_item_size(BOOL);
-    data->buffer_size = calculate_buffer_size(data->item_size, data->max_items);
+    data->output_buffer_size = calculate_buffer_size(data->item_size, data->max_items);
 
-    data->buffer = mmap_fd(data->fd, data->buffer_size);
+    data->output_buffer = mmap_fd(data->fd, data->output_buffer_size);
 
-    write_type(data->buffer, BOOL);
-    write_size(data->buffer,data->buffer_size);
-    write_items(data->buffer,data->max_items);
-    write_index(data->buffer,0);
-
+    write_type(data->output_buffer, BOOL);
+    write_size(data->output_buffer,data->output_buffer_size);
+    write_items(data->output_buffer,data->max_items);
+    write_index(data->output_buffer,0);
+    
     return 0;
 }
 
 int run(module_object *instance)
 {
     printf("SI run\n");
-    struct module_private_data * data = instance->module_data;
+    event(instance, 42);
     return 0;
 }
 
@@ -129,12 +148,25 @@ int event(module_object *instance, int event_id)
     struct module_private_data * data = instance->module_data;
     printf("SI event called with id: %i\n", event_id);
     //
-    // process new data
-    // filter harmonics from samples
-    // test for trip conditions
-    
-    // write trip data
-    write_output_bool(data->buffer,1);
+    int index = read_index(data->input_buffer);
+    if(data->old_index == index)
+    {
+        return -1; // no updated value
+    }
+
+    // new data from input
+    while(data->old_index != index)
+    {
+        int value = read_input_int32(data->input_buffer,data->old_index);
+        printf("data: %i\n",value);
+
+        if(value > 100)// write trip output data
+            write_output_bool(data->output_buffer,1);
+        else
+            write_output_bool(data->output_buffer,0);
+
+        data->old_index++;
+    }  
     //call all registered callbacks
     data->callbacks->callback_event_cb(data->trip_value_changed_id);
     return 0;
@@ -157,7 +189,7 @@ int deinit(module_object *instance)
     close(data->fd);
     close(data->fd_config);
 
-    munmap(data->buffer, data->buffer_size);
+    munmap(data->output_buffer, data->output_buffer_size);
 
     free(data->input_file);
     free(data->output_file);

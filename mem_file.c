@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <string.h>
 
+#include "mem_file.h"
+
 //index in int(4 byte size)
 #define ITEM_SIZE   0
 #define ITEM_ITEMS  1
@@ -33,8 +35,15 @@ inline char *mmap_file(char * filename, int size) // return char* to buffer
     return buffer;
 }
 
-inline char *mmap_fd(int* fd, int size) // return char* to buffer
+inline char *mmap_fd(int fd, int size) // return char* to buffer
 { 
+    // allocate size in file
+    if(ftruncate(fd, size) != 0) 
+    {
+        printf("ftruncate issue\n");
+        return 0;
+    }
+    // mmap file
     char *buffer = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (buffer == MAP_FAILED)
     {
@@ -42,6 +51,13 @@ inline char *mmap_fd(int* fd, int size) // return char* to buffer
         perror("mmap");
         return 0;
     }
+    int i;
+    volatile char val;
+    for(i = 0; i < size; i++)
+    {
+        val = buffer[i];
+    }
+    perror("mmap");
     return buffer;
 }
 
@@ -52,6 +68,18 @@ inline int munmap_file(char * buffer, int size) // return char* to buffer
 
 inline int calculate_buffer_size(int item_size, int max_items)
 {
+    return 16 + item_size*max_items;
+}
+
+inline int calculate_buffer_size_from_file(int fd) //calulate buffer size before the file is mmapped
+{
+    int item_size = 0;
+    read(fd,(char *)&item_size,4);
+    int max_items = 0;
+    read(fd,(char *)&max_items,4);
+    //int index = read(fd,4);
+    //int semaphore = read(fd,2);
+    //int type = read(fd,2);
     return 16 + item_size*max_items;
 }
 
@@ -107,7 +135,7 @@ inline int read_type(char * buffer)
 }
 
 
-inline int lock_buffer(char * buffer, char spin)
+inline int lock_buffer(volatile char * buffer, char spin) //TODO: does volatile here really prevent optimisation of the busy-wait loop???
 {
     if (spin == 0)//test or wait
     {
@@ -136,48 +164,82 @@ inline int free_buffer_lock(char * buffer)
 
 inline char read_input_bool(char * buffer, int index)
 {
-    return buffer[index];
+    lock_buffer(buffer,1);
+    register char result = buffer[index];
+    free_buffer_lock(buffer);
+    return result;
 }
 
 inline char read_input_int8(char * buffer, int index)
 {
-    return buffer[index];
+    lock_buffer(buffer,1);
+    register char result =  buffer[index];
+    free_buffer_lock(buffer);
+    return result;
 }
 
 inline int read_input_int32(char * buffer, int index)
 {
     int *tmp = (int *)buffer;
-    return tmp[index];
+    lock_buffer(buffer,1);
+    register int result = tmp[index];
+    free_buffer_lock(buffer);
+    return result;
+}
+
+inline char read_current_input_bool(char * buffer)
+{
+    lock_buffer(buffer,1);
+    register char result = buffer[read_index(buffer)];
+    free_buffer_lock(buffer);
+    return result;
+}
+
+inline char read_current_input_int8(char * buffer)
+{
+    lock_buffer(buffer,1);
+    register char result =  buffer[read_index(buffer)];
+    free_buffer_lock(buffer);
+    return result;
+}
+
+inline int read_current_input_int32(char * buffer)
+{
+    int *tmp = (int *)buffer;
+    lock_buffer(buffer,1);
+    register int result = tmp[tmp[2]];//tmp[2] == index
+    free_buffer_lock(buffer);
+    return result;
 }
 
 inline int write_type(char *buffer, short type)
 {
-    lock_buffer(buffer,1);
     short *tmp = (short *)buffer;
+    lock_buffer(buffer,1);
     tmp[6] = type;
     free_buffer_lock(buffer);
 }
 
 inline int write_size(char *buffer, int size)
 {
-    lock_buffer(buffer,1);
     int *tmp = (int *)buffer;
+    lock_buffer(buffer,1);
     tmp[0] = size;
     free_buffer_lock(buffer);
 }
 
 inline int write_items(char *buffer, int items)
 {
-    lock_buffer(buffer,1);
     int *tmp = (int *)buffer;
+    lock_buffer(buffer,1);
     tmp[1] = items;
     free_buffer_lock(buffer);
 }
 
 inline int write_index(char *buffer, int index)
 {
-    lock_buffer(buffer,1);
     int *tmp = (int *)buffer;
+    lock_buffer(buffer,1);
     tmp[2] = index;
     free_buffer_lock(buffer);
 }

@@ -14,6 +14,7 @@
             "cwd": "${fileDirname}",
             "environment": [],
             "externalConsole": false,
+            "miDebuggerPath": "/home/user/gdb",
             "MIMode": "gdb",
             "setupCommands": [
                 {

@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"queue.h": "c",
+			"sv_subscriber.h": "c",
+			"types.h": "c",
+			"cfg_parse.h": "c"
+		}
+	}
+}
