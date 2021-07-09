@@ -265,11 +265,11 @@ int register_event_id(const char *event_name)
     event_table * event_id;
     int index = 0;
     LIST_FOREACH(event_id, &event_ids, next) {
-            if(strcmp(event_id->name,event_name) == 0)
-            {
-                return event_id->id;
-            }
-            index++;
+        if(strcmp(event_id->name,event_name) == 0)
+        {
+            return event_id->id;
+        }
+        index++;
     }
     //if no match found, add it, if id's still available
     if(index >= MAX_EVENT_IDS)
@@ -286,6 +286,20 @@ int register_event_id(const char *event_name)
 
     LIST_INSERT_HEAD(&event_ids, new_event, next);
     return new_event->id;
+}
+
+char *find_event_name(int id)
+{
+    event_table * event_id;
+    int index = 0;
+    LIST_FOREACH(event_id, &event_ids, next) {
+        if(event_id->id == id)
+        {
+            return event_id->name;
+        }
+        index++;
+    }
+    return 0;
 }
 
 int subscribe_event_id(int event_id, module_object *module)

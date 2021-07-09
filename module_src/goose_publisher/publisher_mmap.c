@@ -19,20 +19,24 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
+typedef struct _data_inputs {
+    char *filename;
+    int fd;
+    char *buffer;
+    int buffer_size;
+    MmsValue *element;
+} data_inputs;
 
 struct module_private_data {
     module_callbacks *callbacks;
+    CommParameters gooseCommParameters;
+    GoosePublisher publisher;
+    LinkedList dataSetValues;
 
-    uint32_t item_size;
-    uint32_t max_items;
-    uint32_t buffer_index;
-    char ** input_buffers;
-    uint32_t input_buffer_size;
-    int fd;
-    int fd_config;
+    int input_count;
+    data_inputs **inputs;
 
     char * interface;
-    char * shm_name;
 
     unsigned char * srcMac;
     unsigned char * dstMac;
@@ -61,14 +65,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
-    data->item_size = 0;
-    data->max_items = 0;
-    data->buffer_index = -1;
-    data->fd = 0;
-    data->fd_config = 0;
-
+    data->input_count = 0;
     data->interface = 0;
-    data->shm_name = 0;
 
     data->srcMac = NULL;
     data->dstMac = NULL;
@@ -137,11 +135,23 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_int(config,"ndscomm",&data->ndscomm) != 0) { return -1; }
     if(cfg_get_int(config,"ttl",&data->ttl) != 0) { return -1; }
 
+    if(cfg_get_int(config,"input_count",&data->input_count) != 0) { return -1; }
+
+    data->inputs = malloc(sizeof(data_inputs) * data->input_count);
+    int i;
+    for(i = 0; i < data->input_count; i++)
+    {
+        char input_f[256];
+        sprintf(input_f,"input_file%d",i);
+        data->inputs[i]->filename = 0;
+        if(cfg_get_string(config, input_f, &data->inputs[i]->filename) != 0) { return -1; }
+    }
     //dataset={int,bool,float,dbpos,string,time}
 
     data->callbacks = callbacks;
     //store module data in pointer
     instance->module_data = data;
+    cfg_free(config);
     return 0;
 }
 
@@ -150,45 +160,63 @@ int init(module_object *instance, module_callbacks *callbacks)
     printf("goose init\n");
     struct module_private_data * data = instance->module_data;
 
-    //allocate mmaped buffers
-
-    CommParameters gooseCommParameters;
-
-    gooseCommParameters.appId = 1000;
-    gooseCommParameters.dstAddress[0] = 0x01;
-    gooseCommParameters.dstAddress[1] = 0x0c;
-    gooseCommParameters.dstAddress[2] = 0xcd;
-    gooseCommParameters.dstAddress[3] = 0x01;
-    gooseCommParameters.dstAddress[4] = 0x00;
-    gooseCommParameters.dstAddress[5] = 0x01;
-    gooseCommParameters.vlanId = 0;
-    gooseCommParameters.vlanPriority = 4;
-
-    GoosePublisher publisher = GoosePublisher_create(&gooseCommParameters, "eth0");
-
-    if (publisher) {
-        GoosePublisher_setGoCbRef(publisher, "simpleIOGenericIO/LLN0$GO$gcbAnalogValues");
-        GoosePublisher_setConfRev(publisher, 1);
-        GoosePublisher_setDataSetRef(publisher, "simpleIOGenericIO/LLN0$AnalogValues");
-        GoosePublisher_setTimeAllowedToLive(publisher, 500);
-    }
-
-    //datasets
-    /*
-    alloc mmap buffer for element-values (add sizeof of all together for buf-size)
-    alloc array1 for element-position in buffer
-    alloc array2 for mmsvalue pointer
-   
-    LinkedList dataSetValues = LinkedList_create();
-    for (index in array)
+    //allocate mmaped buffers for each input
+    int i;
+    for(i = 0; i < data->input_count; i++)
     {
-        set value in buffer
-        create mmsvalue(value)
-        assign mmsvalue to array2
-        add to dataset linked list
-        LinkedList_add(dataSetValues, mmsval);
+        data->inputs[i]->fd = open(data->inputs[i]->filename, O_RDWR, S_IRUSR );
+        if (data->inputs[i]->fd < 0)
+        {
+            perror("open");
+            return -10;
+        }
+        
+        data->inputs[i]->buffer_size = calculate_buffer_size_from_file(data->inputs[i]->fd );
+        data->inputs[i]->buffer = mmap_fd_write(data->inputs[i]->fd, data->inputs[i]->buffer_size);
     }
-    */
+
+    data->gooseCommParameters.appId = data->appid;
+    data->gooseCommParameters.dstAddress[0] = data->dstMAC[0];
+    data->gooseCommParameters.dstAddress[1] = data->dstMAC[1];
+    data->gooseCommParameters.dstAddress[2] = data->dstMAC[2];
+    data->gooseCommParameters.dstAddress[3] = data->dstMAC[3];
+    data->gooseCommParameters.dstAddress[4] = data->dstMAC[4];
+    data->gooseCommParameters.dstAddress[5] = data->dstMAC[5];
+    data->gooseCommParameters.vlanId = data->vlanid;
+    data->gooseCommParameters.vlanPriority = data->vlanprio;
+
+    data->publisher = GoosePublisher_create(&data->gooseCommParameters, data->interface);
+
+    if (data->publisher) {
+        GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
+        GoosePublisher_setConfRev(data->publisher, data->confrev);
+        GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
+        GoosePublisher_setTimeAllowedToLive(data->publisher, data->ttl);
+    }
+   
+    data->dataSetValues = LinkedList_create();
+    for(i = 0; i < data->input_count; i++)
+    {
+        int type = read_type(data->inputs[i]->buffer);
+        switch(type)
+        {
+            case BOOL:
+                data->inputs[i]->element = MmsValue_newBoolean( read_current_input_bool(data->inputs[i]->buffer) );
+                LinkedList_add(data->dataSetValues, data->inputs[i]->element);
+                break;
+            case INT8:
+                data->inputs[i]->element = MmsValue_newIntegerFromInt8( read_current_input_int8(data->inputs[i]->buffer) );
+                LinkedList_add(data->dataSetValues, data->inputs[i]->element);
+                break;
+            case INT32:
+                data->inputs[i]->element = MmsValue_newIntegerFromInt32( read_current_input_int32(data->inputs[i]->buffer) );
+                LinkedList_add(data->dataSetValues, data->inputs[i]->element);
+                break; 
+            //TODO add more types
+            default:
+                break;           
+        }
+    }
     //initialise receiver
 
     return 0;
@@ -197,10 +225,11 @@ int init(module_object *instance, module_callbacks *callbacks)
 int run(module_object *instance)
 {
     printf("goose run\n");
-
+    struct module_private_data * data = instance->module_data;
     //during operation
     while(true)
     {
+
         /*if(index != oldindex)//index is updated
         {
             for(idx in array)//check complete buffer
@@ -211,8 +240,11 @@ int run(module_object *instance)
             //send goose
             set fast transmit
         }
-        retransmit
-        GoosePublisher_publish(publisher, dataSetValues);*/
+        //retransmit*/
+
+        
+        GoosePublisher_publish(data->publisher, data->dataSetValues);
+        break;
     }
     //have thread handle retransmission scheme
     return 0;
@@ -234,10 +266,10 @@ int test(void)
 int deinit(module_object *instance)
 {
     printf("goose deinit\n");
-
-    //LinkedList_destroyDeep(dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
-    //cfg_free(config);
     struct module_private_data * data = instance->module_data;
+    LinkedList_destroyDeep(data->dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
+
+    free(data->interface);
     free(data);
     return 0;
 }

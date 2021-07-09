@@ -124,6 +124,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->callbacks = callbacks;
     //store module data in pointer
     instance->module_data = data;
+    cfg_free(config);
     return 0;
 }
 
@@ -135,8 +136,13 @@ int init(module_object *instance, module_callbacks *callbacks)
     //allocate mmaped buffer
     data->item_size = type_to_item_size(SMV92);
     data->output_buffer_size = calculate_buffer_size(data->item_size + 4, data->max_items);
-
-    data->output_buffer = mmap_fd(data->fd, data->output_buffer_size);
+    // allocate size in file
+    if(ftruncate(data->fd, data->output_buffer_size + 10) != 0) 
+    {
+        printf("ERROR: ftruncate issue\n");
+        return -20;
+    }
+    data->output_buffer = mmap_fd_write(data->fd, data->output_buffer_size);
 
     write_type(data->output_buffer, SMV92);
     write_size(data->output_buffer,data->item_size);

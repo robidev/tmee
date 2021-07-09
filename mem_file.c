@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -20,7 +21,7 @@
 //index in byte(1 byte size)
 #define SEMAPHORE_POS   14
 
-inline char *mmap_file(char * filename, int size) // return char* to buffer
+char *mmap_file(char * filename, int size) // return char* to buffer
 {
     int fd = open(filename, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
     if (fd < 0)
@@ -29,25 +30,24 @@ inline char *mmap_file(char * filename, int size) // return char* to buffer
         perror("open");
         return 0;
     }
-    
-    char *buffer = mmap_fd(fd, size);
+    // allocate size in file
+    if(ftruncate(fd, size+10) != 0) 
+    {
+        printf("ERROR: ftruncate issue\n");
+        return 0;
+    }
+    char *buffer = mmap_fd_write(fd, size);
     close(fd);
     return buffer;
 }
 
-inline char *mmap_fd(int fd, int size) // return char* to buffer
+char *mmap_fd_write(int fd, int size) // return char* to buffer
 { 
-    // allocate size in file
-    if(ftruncate(fd, size) != 0) 
-    {
-        printf("ftruncate issue\n");
-        return 0;
-    }
+    errno = 0;
     // mmap file
-    char *buffer = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    char *buffer = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd, 0);
     if (buffer == MAP_FAILED)
     {
-        printf("mmap issue:\n");
         perror("mmap");
         return 0;
     }
@@ -61,17 +61,37 @@ inline char *mmap_fd(int fd, int size) // return char* to buffer
     return buffer;
 }
 
-inline int munmap_file(char * buffer, int size) // return char* to buffer
+char *mmap_fd_read(int fd, int size) // return char* to buffer
+{ 
+    errno = 0;
+    // mmap file
+    char *buffer = mmap(NULL, size, PROT_READ, MAP_SHARED | MAP_POPULATE, fd, 0);
+    if (buffer == MAP_FAILED)
+    {
+        perror("mmap");
+        return 0;
+    }
+    int i;
+    volatile char val;
+    for(i = 0; i < size; i++)
+    {
+        val = buffer[i];
+    }
+    perror("mmap");
+    return buffer;
+}
+
+int munmap_file(char * buffer, int size) // return char* to buffer
 {
     return munmap(buffer, size);
 }
 
-inline int calculate_buffer_size(int item_size, int max_items)
+int calculate_buffer_size(int item_size, int max_items)
 {
     return 16 + item_size*max_items;
 }
 
-inline int calculate_buffer_size_from_file(int fd) //calulate buffer size before the file is mmapped
+int calculate_buffer_size_from_file(int fd) //calulate buffer size before the file is mmapped
 {
     int item_size = 0;
     read(fd,(char *)&item_size,4);

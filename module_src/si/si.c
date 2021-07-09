@@ -71,19 +71,11 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     if(cfg_get_string(config, "input_file", &data->input_file) != 0) { return -1; }
     printf("Set input_file: %s\n", data->input_file);
-    //mmap input file
-    data->in = open(data->input_file, O_RDWR, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
-    if (data->in < 0)
-    {
-        perror("open");
-        return -10;
-    }
-
 
     if(cfg_get_string(config, "output_file", &data->output_file) != 0) { return -1; }
     printf("Set output_file: %s\n", data->output_file);
 
-    //create/mmap output file
+    //create output file(s)
     data->fd = open(data->output_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
     if (data->fd < 0)
     {
@@ -109,6 +101,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->callbacks = callbacks;
     //store module data in pointer
     instance->module_data = data;
+    cfg_free(config);
     return 0;
 }
 
@@ -117,19 +110,31 @@ int init(module_object *instance, module_callbacks *callbacks)
     printf("init SI\n");
     struct module_private_data * data = instance->module_data;
 
+    //mmap input file
+    data->in = open(data->input_file, O_RDWR, S_IRUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
+    if (data->in < 0)
+    {
+        perror("open");
+        return -10;
+    }
     //map input file
     data->input_buffer_size = calculate_buffer_size_from_file(data->in);
-    data->input_buffer = mmap_fd(data->in, data->input_buffer_size);
+    data->input_buffer = mmap_fd_write(data->in, data->input_buffer_size);
     data->old_index = read_index(data->input_buffer);
 
     //map output file
     data->item_size = type_to_item_size(BOOL);
     data->output_buffer_size = calculate_buffer_size(data->item_size, data->max_items);
-
-    data->output_buffer = mmap_fd(data->fd, data->output_buffer_size);
+    // allocate size in file
+    if(ftruncate(data->fd, data->output_buffer_size+10) != 0) 
+    {
+        printf("ERROR: ftruncate issue\n");
+        return -20;
+    }
+    data->output_buffer = mmap_fd_write(data->fd, data->output_buffer_size);
 
     write_type(data->output_buffer, BOOL);
-    write_size(data->output_buffer,data->output_buffer_size);
+    write_size(data->output_buffer,data->item_size);
     write_items(data->output_buffer,data->max_items);
     write_index(data->output_buffer,0);
     
