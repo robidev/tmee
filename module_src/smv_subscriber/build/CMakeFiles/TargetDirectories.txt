@@ -1,4 +1,0 @@
-/home/user/Desktop/mmap/subscriber/build/CMakeFiles/edit_cache.dir
-/home/user/Desktop/mmap/subscriber/build/CMakeFiles/test.dir
-/home/user/Desktop/mmap/subscriber/build/CMakeFiles/rebuild_cache.dir
-/home/user/Desktop/mmap/subscriber/build/CMakeFiles/subscriber_mmap.dir
