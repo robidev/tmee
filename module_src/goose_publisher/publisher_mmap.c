@@ -20,7 +20,6 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
-#define GOOSE_FAST_RETRANSMIT_TTL 10
 
 typedef void (*update_func)(MmsValue *element, char *buffer, int index);
 
@@ -68,6 +67,8 @@ struct module_private_data {
 
     int current_ttl;//in miliseconds
     long transmit_deadline;
+    int GOOSE_FAST_RETRANSMIT_TTL;
+    int MAX_LAG;
 };
 
 long current_time()
@@ -101,6 +102,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->simulation = 0;
     data->ndscomm = 0;
     data->ttl = 2000;
+    data->GOOSE_FAST_RETRANSMIT_TTL = 20;
+    data->MAX_LAG = 5;
 
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
@@ -150,6 +153,9 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_int(config,"ndscomm",&data->ndscomm) != 0) { return -1; }
     if(cfg_get_int(config,"ttl",&data->ttl) != 0) { return -1; }
     data->current_ttl = data->ttl;//start with slow retransmit
+    if(cfg_get_int(config,"GOOSE_FAST_RETRANSMIT_TTL",&data->GOOSE_FAST_RETRANSMIT_TTL) != 0) { return -1; }
+    if(cfg_get_int(config,"MAX_LAG",&data->MAX_LAG) != 0) { return -1; }
+
 
     if(cfg_get_int(config,"input_count",&data->input_count) != 0) { return -1; }
 
@@ -279,7 +285,19 @@ int event(module_object *instance, int event_id)
         if(data->inputs[i]->old_index != current_index)
         {
             transmit_now = 1;//we have an update in the dataset
-            data->inputs[i]->old_index++;//increment the last transmitted index
+
+            //check if the difference between newest and current value is not too big
+            int diff = current_index - data->inputs[i]->old_index;
+            if( diff < 0 ) { diff += read_items(data->inputs[i]->buffer); } // wrap difference-counter
+            
+            if(diff > data->MAX_LAG) //if we start lagging more then MAX_LAG items, make a jump to the most recent value
+            {
+                data->inputs[i]->old_index = current_index;//increment the last transmitted index
+            }
+            else
+            {
+                data->inputs[i]->old_index++;//increment the last transmitted index
+            }
             //update the mms value in the linked list
             data->inputs[i]->update_function(data->inputs[i]->element, data->inputs[i]->buffer, data->inputs[i]->old_index); 
         }
@@ -288,8 +306,8 @@ int event(module_object *instance, int event_id)
     {
         GoosePublisher_increaseStNum(data->publisher);
 
-        data->current_ttl = GOOSE_FAST_RETRANSMIT_TTL;
-        data->transmit_deadline += GOOSE_FAST_RETRANSMIT_TTL / 2;//schedule for half the ttl time
+        data->current_ttl = data->GOOSE_FAST_RETRANSMIT_TTL;
+        data->transmit_deadline += data->GOOSE_FAST_RETRANSMIT_TTL / 2;//schedule for half the ttl time
         GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl);
 
         GoosePublisher_publish(data->publisher, data->dataSetValues);
