@@ -9,7 +9,8 @@
 			"queue.h": "c",
 			"sv_subscriber.h": "c",
 			"types.h": "c",
-			"cfg_parse.h": "c"
+			"cfg_parse.h": "c",
+			"module_interface.h": "c"
 		}
 	}
 }

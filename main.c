@@ -4,6 +4,7 @@
 #include <sys/time.h>
 #include <sys/queue.h> //http://infnis.wikidot.com/list-from-sys-queue-h
 #include <string.h>
+#include <signal.h>
 #include "cfg_parse.h"
 #include "module_interface.h"
 
@@ -44,6 +45,14 @@ event_chain *event_chains[MAX_EVENT_IDS];
 module_callbacks callbacks;
 int deadlines_skipped = 0;
 /* End globals */
+
+static int running = 1;
+
+void sigint_handler(int signalId)
+{
+    running = 0;
+}
+
 
 int main(int argc, char ** argv)
 {
@@ -189,7 +198,7 @@ int main(int argc, char ** argv)
     }
     //initialise modules in loaded order
     init_modules();
-
+    signal(SIGINT, sigint_handler);
     //execute run loop
     if(interval > 0)
     {
@@ -351,7 +360,6 @@ long current_time()
 
 void run_asap()
 {
-    int running = 1;
     while(running)
     {
         long start_time = current_time();
@@ -382,7 +390,6 @@ void run_deadline(long interval)
 {
     const long slack = 10;
     long next_deadline = interval + current_time();
-    int running = 1;
 
     while(running)
     {

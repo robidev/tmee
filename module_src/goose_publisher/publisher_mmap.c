@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <sys/time.h>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -19,12 +20,22 @@
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
+#define GOOSE_FAST_RETRANSMIT_TTL 10
+
+typedef void (*update_func)(MmsValue *element, char *buffer, int index);
+
+void update_bool(MmsValue *element, char *buffer, int index);
+void update_int8(MmsValue *element, char *buffer, int index);
+void update_int32(MmsValue *element, char *buffer, int index);
+
 typedef struct _data_inputs {
     char *filename;
     int fd;
     char *buffer;
     int buffer_size;
+    int old_index;
     MmsValue *element;
+    update_func update_function;
 } data_inputs;
 
 struct module_private_data {
@@ -53,11 +64,18 @@ struct module_private_data {
     int confrev;
     int simulation;
     int ndscomm;
-    int ttl;
+    int ttl;//in miliseconds
 
-    int stNum;
-    int sqNum;
+    int current_ttl;//in miliseconds
+    long transmit_deadline;
 };
+
+long current_time()
+{
+    struct timeval timecheck;
+    gettimeofday(&timecheck, NULL);
+    return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
+}
 
 int pre_init(module_object *instance, module_callbacks *callbacks)
 {
@@ -82,10 +100,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->confrev = 1;
     data->simulation = 0;
     data->ndscomm = 0;
-    data->ttl = 500;
-
-    data->stNum = 0;
-    data->sqNum = 0;
+    data->ttl = 2000;
 
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
@@ -134,6 +149,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_int(config,"simulation",&data->simulation) != 0) { return -1; }
     if(cfg_get_int(config,"ndscomm",&data->ndscomm) != 0) { return -1; }
     if(cfg_get_int(config,"ttl",&data->ttl) != 0) { return -1; }
+    data->current_ttl = data->ttl;//start with slow retransmit
 
     if(cfg_get_int(config,"input_count",&data->input_count) != 0) { return -1; }
 
@@ -173,6 +189,7 @@ int init(module_object *instance, module_callbacks *callbacks)
         
         data->inputs[i]->buffer_size = calculate_buffer_size_from_file(data->inputs[i]->fd );
         data->inputs[i]->buffer = mmap_fd_write(data->inputs[i]->fd, data->inputs[i]->buffer_size);
+        data->inputs[i]->old_index = 0;
     }
 
     data->gooseCommParameters.appId = data->appid;
@@ -191,7 +208,7 @@ int init(module_object *instance, module_callbacks *callbacks)
         GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
         GoosePublisher_setConfRev(data->publisher, data->confrev);
         GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
-        GoosePublisher_setTimeAllowedToLive(data->publisher, data->ttl);
+        GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl);
     }
    
     data->dataSetValues = LinkedList_create();
@@ -201,14 +218,17 @@ int init(module_object *instance, module_callbacks *callbacks)
         switch(type)
         {
             case BOOL:
+                data->inputs[i]->update_function = update_bool;
                 data->inputs[i]->element = MmsValue_newBoolean( read_current_input_bool(data->inputs[i]->buffer) );
                 LinkedList_add(data->dataSetValues, data->inputs[i]->element);
                 break;
             case INT8:
+                data->inputs[i]->update_function = update_int8;
                 data->inputs[i]->element = MmsValue_newIntegerFromInt8( read_current_input_int8(data->inputs[i]->buffer) );
                 LinkedList_add(data->dataSetValues, data->inputs[i]->element);
                 break;
             case INT32:
+                data->inputs[i]->update_function = update_int32;
                 data->inputs[i]->element = MmsValue_newIntegerFromInt32( read_current_input_int32(data->inputs[i]->buffer) );
                 LinkedList_add(data->dataSetValues, data->inputs[i]->element);
                 break; 
@@ -218,41 +238,64 @@ int init(module_object *instance, module_callbacks *callbacks)
         }
     }
     //initialise receiver
+    data->transmit_deadline = current_time() + (data->current_ttl/2);//schedule for half the ttl time
 
     return 0;
 }
 
 int run(module_object *instance)
 {
-    printf("goose run\n");
     struct module_private_data * data = instance->module_data;
-    //during operation
-    while(true)
+    printf("goose run\n");
+    if(event(instance,42) != 1)//no stval change
     {
-
-        /*if(index != oldindex)//index is updated
+        //check time, if next retransmit is due
+        if(current_time() >= data->transmit_deadline)
         {
-            for(idx in array)//check complete buffer
+            data->current_ttl = data->current_ttl * 2;
+            if(data->current_ttl > data->ttl)
             {
-                value = buffer[array1[idx]]
-                setmmsvalue(array2[idx], value)
+                data->current_ttl = data->ttl;
             }
-            //send goose
-            set fast transmit
-        }
-        //retransmit*/
+            data->transmit_deadline += data->current_ttl / 2;//schedule for half the ttl time
 
-        
-        GoosePublisher_publish(data->publisher, data->dataSetValues);
-        break;
+            GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl);
+            GoosePublisher_publish(data->publisher, data->dataSetValues);
+        }
     }
-    //have thread handle retransmission scheme
     return 0;
 }
 
 int event(module_object *instance, int event_id)
 {
     printf("goose event %i\n", event_id);
+    struct module_private_data * data = instance->module_data;
+    //during operation
+    int transmit_now = 0;
+    int i;
+    for(i = 0; i < data->input_count; i++)
+    {
+        int current_index = read_index(data->inputs[i]->buffer);
+        if(data->inputs[i]->old_index != current_index)
+        {
+            transmit_now = 1;//we have an update in the dataset
+            data->inputs[i]->old_index++;//increment the last transmitted index
+            //update the mms value in the linked list
+            data->inputs[i]->update_function(data->inputs[i]->element, data->inputs[i]->buffer, data->inputs[i]->old_index); 
+        }
+    }
+    if(transmit_now == 1)
+    {
+        GoosePublisher_increaseStNum(data->publisher);
+
+        data->current_ttl = GOOSE_FAST_RETRANSMIT_TTL;
+        data->transmit_deadline += GOOSE_FAST_RETRANSMIT_TTL / 2;//schedule for half the ttl time
+        GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl);
+
+        GoosePublisher_publish(data->publisher, data->dataSetValues);
+
+        return 1;
+    }
     return 0;
 }
 
@@ -267,34 +310,34 @@ int deinit(module_object *instance)
 {
     printf("goose deinit\n");
     struct module_private_data * data = instance->module_data;
+    GoosePublisher_destroy(data->publisher);
     LinkedList_destroyDeep(data->dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
+    int i;
+    for(i = 0; i < data->input_count; i++)
+    {
+        free(data->inputs[i]->filename);
+        munmap(data->inputs[i]->buffer,data->inputs[i]->buffer_size);
+    }
+    free(data->inputs);
 
     free(data->interface);
+    free(data->gocbref);
+    free(data->datasetref);
     free(data);
     return 0;
 }
 
-void updateElement(int index, void * value)
+void update_bool(MmsValue *element, char *buffer, int index)
 {
-    //write data to mmaped buffer
-    //trigger trigger fast retransmit
-    //increment stval index
+    MmsValue_setBoolean(element, read_input_bool(buffer,index));
 }
 
-void TriggerRestransmit()
+void update_int8(MmsValue *element, char *buffer, int index)
 {
-    //send out new goose
-    //set timeout for next goose
+    MmsValue_setInt8(element, read_input_int8(buffer,index));
 }
 
-void slowRetransmit()
+void update_int32(MmsValue *element, char *buffer, int index)
 {
-    //send goose
-    //if retransmit-time < max, double it
-    //if retransmit-time > max; retransmit-time = max;
+    MmsValue_setInt32(element, read_input_int32(buffer,index));
 }
-
-void sendGoose()
-{
-}
-
