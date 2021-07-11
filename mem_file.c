@@ -94,9 +94,18 @@ int calculate_buffer_size(int item_size, int max_items)
 int calculate_buffer_size_from_file(int fd) //calulate buffer size before the file is mmapped
 {
     int item_size = 0;
-    read(fd,(char *)&item_size,4);
+    if(read(fd,(char *)&item_size,4) != 4)
+    {
+        printf("ERROR: could not read item size");
+        return -1;
+    }
+
     int max_items = 0;
-    read(fd,(char *)&max_items,4);
+    if(read(fd,(char *)&max_items,4) != 4)
+    {
+        printf("ERROR: could not read max items");
+        return -1;
+    }
     //int index = read(fd,4);
     //int semaphore = read(fd,2);
     //int type = read(fd,2);

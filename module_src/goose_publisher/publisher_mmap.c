@@ -84,6 +84,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
+    data->publisher = 0;
+    data->dataSetValues = 0;
     data->input_count = 0;
     data->interface = 0;
 
@@ -210,12 +212,14 @@ int init(module_object *instance, module_callbacks *callbacks)
 
     data->publisher = GoosePublisher_create(&data->gooseCommParameters, data->interface);
 
-    if (data->publisher) {
-        GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
-        GoosePublisher_setConfRev(data->publisher, data->confrev);
-        GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
-        GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl);
+    if(data->publisher == NULL) {
+        printf("ERROR: could not create GOOSE publisher\n");
+        return -1;
     }
+    GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
+    GoosePublisher_setConfRev(data->publisher, data->confrev);
+    GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
+    GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl);
    
     data->dataSetValues = LinkedList_create();
     for(i = 0; i < data->input_count; i++)
@@ -328,8 +332,10 @@ int deinit(module_object *instance)
 {
     printf("goose deinit\n");
     struct module_private_data * data = instance->module_data;
-    GoosePublisher_destroy(data->publisher);
-    LinkedList_destroyDeep(data->dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
+    if(data->publisher)
+        GoosePublisher_destroy(data->publisher);
+    if(data->dataSetValues)
+        LinkedList_destroyDeep(data->dataSetValues, (LinkedListValueDeleteFunction) MmsValue_delete);
     int i;
     for(i = 0; i < data->input_count; i++)
     {

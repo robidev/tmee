@@ -258,7 +258,7 @@ int cfg_get_int(struct cfg_struct *config, const char * key, int *value)
   const char *value_i = cfg_get(config, key);
   if(value_i == NULL)
   {
-    printf("ERROR: could not find %s value in config file\n", key);
+    printf("WARNING: could not find %s value in config file\n", key);
     return -1;
   }
   if(sscanf(value_i, "%d", value) != 1)
@@ -279,7 +279,7 @@ int cfg_get_string(struct cfg_struct *config, const char * key, char **value)
   const char *value_i = cfg_get(config, key);
   if(value_i == NULL)
   {
-    printf("ERROR: could not find %s value in config file\n", key);
+    printf("WARNING: could not find %s value in config file\n", key);
     return -1;
   }
   if(sscanf(value_i, "\"%m[^\"]\"", value) != 1)
@@ -300,7 +300,7 @@ int cfg_get_hex(struct cfg_struct *config, const char * key, short unsigned int 
   const char *value_i = cfg_get(config, key);
   if(value_i == NULL)
   {
-    printf("ERROR: could not find %s value in config file\n", key);
+    printf("WARNING: could not find %s value in config file\n", key);
     return -1;
   }
   unsigned int temp_value;
@@ -323,7 +323,7 @@ int cfg_get_mac(struct cfg_struct *config, const char * key, unsigned char *MAC)
   const char *value_i = cfg_get(config, key);
   if(value_i == NULL)
   {
-    printf("ERROR: could not find %s value in config file\n", key);
+    printf("WARNING: could not find %s value in config file\n", key);
     return -1;
   }
 

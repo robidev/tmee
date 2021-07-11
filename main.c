@@ -15,7 +15,8 @@
 //implement 'break signals'
 //other timin-scheme (interrupt)
 
-void init_modules();
+int init_modules();
+void clean_all();
 void unload_modules();
 int register_event_id(const char *event_name);
 int subscribe_event_id(int event_id, module_object *module);
@@ -107,42 +108,52 @@ int main(int argc, char ** argv)
         char module_i[256] = "";
 
         char *module_file=0;
+
+        //load the module filename
         sprintf(module_i, "module%d_file", module_index);
-        if(cfg_get_string(config, module_i, &module_file) !=0) { continue; }
+        printf("\nLOADING: %s\n", module_i);
+        if(cfg_get_string(config, module_i, &module_file) !=0) {continue; }
+
+        //allocate module instance
         module_object *module_instance = (module_object *) malloc(sizeof(module_object));
+
+        //load library
         module_instance->lib = dlopen(module_file, RTLD_NOW);
         if(module_instance->lib == 0)
         {
             printf("ERROR: cannot load library %s\n", module_file);
             fprintf(stderr, "%s\n", dlerror()); 
             free(module_file);
+            free(module_instance);
             continue;
         }
         free(module_file);
 
+        //load settings
         module_instance->pre_init = dlsym(module_instance->lib, "pre_init");
-        if(*module_instance->pre_init == 0){printf("pre_init error\n"); continue;}
+        if(*module_instance->pre_init == 0){printf("pre_init error\n"); free(module_instance); continue;}
 
         module_instance->init = dlsym(module_instance->lib, "init");
-        if(*module_instance->init == 0){printf("init error\n"); continue;}
+        if(*module_instance->init == 0){printf("init error\n"); free(module_instance); continue;}
 
         module_instance->run = dlsym(module_instance->lib, "run");
-        if(*module_instance->run == 0){printf("run error\n"); continue;}
+        if(*module_instance->run == 0){printf("run error\n"); free(module_instance); continue;}
 
         module_instance->test = dlsym(module_instance->lib, "test");
-        if(*module_instance->test == 0){printf("test error\n"); continue;}
+        if(*module_instance->test == 0){printf("test error\n"); free(module_instance); continue;}
 
         module_instance->event = dlsym(module_instance->lib, "event");
-        if(*module_instance->event == 0){printf("event error\n"); continue;}
+        if(*module_instance->event == 0){printf("event error\n"); free(module_instance); continue;}
 
         module_instance->deinit = dlsym(module_instance->lib, "deinit");
-        if(*module_instance->deinit == 0){printf("deinit error\n"); continue;}
+        if(*module_instance->deinit == 0){printf("deinit error\n"); free(module_instance); continue;}
 
         //set global config data
         char *module_id=0;
         sprintf(module_i, "module%d_id", module_index);
         if(cfg_get_string(config, module_i,&module_id) !=0) 
         { 
+            free(module_instance);
             continue; 
         }
         module_instance->config_id = module_id;
@@ -151,20 +162,31 @@ int main(int argc, char ** argv)
         sprintf(module_i, "module%d_config", module_index);
         if(cfg_get_string(config, module_i, &module_config) !=0) 
         { 
+            free(module_id);
+            free(module_instance);
             continue; 
         }        
         module_instance->config_file = module_config;
         
+        //initialise deadline
         module_instance->deadline = -1; //deadline will be set by init;
 
         //initialise output files
-        module_instance->pre_init(module_instance,&callbacks);
+        printf("-- calling pre_init() --\n"); 
+        if(module_instance->pre_init(module_instance,&callbacks) != 0)
+        {
+            free(module_id);
+            free(module_config);
+            free(module_instance);
+            printf("pre_init error\n"); 
+            continue;
+        }
 
-        //register callbacks
+        //register this module to be called when a specific event is published 
         char * event_name = 0;
         int idx = 1;
         sprintf(module_i, "module%d_event_trigger_id%d",module_index, idx);
-        while(cfg_get_string(config, module_i, &event_name) ==0)
+        while(cfg_get_string(config, module_i, &event_name) == 0)
         {
             printf("event trigger: %s\n",event_name);
             int id = register_event_id(event_name);
@@ -194,12 +216,42 @@ int main(int argc, char ** argv)
                 }
             }            
         }
-
+        printf("MODULE REGISTERED: module%d_file\n", module_index);
     }
+
+    if(LIST_FIRST(&registered_modules) == NULL)
+    {
+        printf("ERROR: no modules loaded for init\n");
+        clean_all();
+        //free allocated memory
+        free(interval_type);
+        free(test_filename);
+        free(logfile);
+        cfg_free(config);
+        return -1;
+    }
+
     //initialise modules in loaded order
     init_modules();
+
+    //all modules were unloaded due to unsuccesfull init
+    if(LIST_FIRST(&registered_modules) == NULL)
+    {
+        printf("ERROR: no modules loaded for run\n");
+        clean_all();
+        //free allocated memory
+        free(interval_type);
+        free(test_filename);
+        free(logfile);
+        cfg_free(config);
+        return -1;
+    }
+
+    //register ctr-c handler
     signal(SIGINT, sigint_handler);
+
     //execute run loop
+    printf("\ncalling run()\n");
     if(interval > 0)
     {
         //busy-wait loop
@@ -212,7 +264,19 @@ int main(int argc, char ** argv)
     }
 
     //cleanup everything nicely
+    printf("\ncleaning up\n");
+    clean_all();
+    //free allocated memory
+    free(interval_type);
+    free(test_filename);
+    free(logfile);
+    cfg_free(config);
 
+    return 0;
+}
+
+void clean_all()
+{
     //deinit and free loaded modules
     unload_modules();
 
@@ -236,23 +300,27 @@ int main(int argc, char ** argv)
             free(temp);
         }
     }
-
-    //free allocated memory
-    free(interval_type);
-    free(test_filename);
-    free(logfile);
-    cfg_free(config);
-    return 0;
 }
 
-void init_modules()
+int init_modules()
 {
     //initialise modules in correct order
     module_object * module;
     LIST_FOREACH(module, &registered_modules, next)
     {
-        module->init(module,&callbacks);
+        printf("\nINIT: %s\n", module->config_id);
+        if(module->init(module,&callbacks) != 0)
+        {
+            printf("ERROR: init() failed for module: %s, removing from list\n", module->config_id);
+            LIST_REMOVE(module,next);
+            module->deinit(module);
+            free(module->config_id);
+            free(module->config_file);
+            dlclose(module->lib);
+            free(module);
+        }
     }
+    return 0;
 }
 
 void unload_modules()
@@ -315,7 +383,7 @@ int subscribe_event_id(int event_id, module_object *module)
 {
     if(event_id >= MAX_EVENT_IDS)
     {
-        printf("ERROR: requested event id(%i) is out of bounds(MAX_EVENT_IDS=%i)",event_id,MAX_EVENT_IDS);
+        printf("ERROR: requested event id(%i) is out of bounds(MAX_EVENT_IDS=%i)\n",event_id,MAX_EVENT_IDS);
         return -1;
     }
     event_chain *chain = event_chains[event_id];
@@ -345,7 +413,10 @@ int run_callback_func(int event_id)
     event_chain *chain = event_chains[event_id];
     while(chain)
     {
-        chain->module->event(chain->module,event_id);
+        if(chain->module->event(chain->module,event_id) != 0)
+        {
+            printf("ERROR during event\n");
+        }
         chain = chain->next;
     }
     return 0;
@@ -367,7 +438,10 @@ void run_asap()
         LIST_FOREACH(module, &registered_modules, next)
         {
             long start = current_time();
-            module->run(module);
+            if(module->run(module) != 0)
+            {
+                printf("ERROR during run\n");
+            }
             long end = current_time();
             if(end - start > module->deadline)
             {
@@ -402,11 +476,14 @@ void run_deadline(long interval)
             LIST_FOREACH(module, &registered_modules, next)
             {
                 long start = current_time();
-                module->run(module);
+                if(module->run(module) != 0)
+                {
+                    printf("ERROR during run\n");
+                }
                 long end = current_time();
                 if(end - start > module->deadline)
                 {
-                    printf("ERROR: module deadline(%li) overshot by %li",module->deadline, (end - start) - module->deadline);
+                    printf("ERROR: module deadline(%li) overshot by %li\n",module->deadline, (end - start) - module->deadline);
                 }
                 profile(start,end);//log timing of this run
             }
@@ -417,7 +494,7 @@ void run_deadline(long interval)
             long spare = next_deadline - (end_time + slack);
             if(spare < 0)
             {
-                printf("ERROR: overall deadline(%li) overshot by %li",interval, 0 - spare);
+                printf("ERROR: overall deadline(%li) overshot by %li\n",interval, 0 - spare);
                 //ensure the next deadline can be met
                 while(spare < slack)
                 {

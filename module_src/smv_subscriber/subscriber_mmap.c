@@ -125,6 +125,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     //store module data in pointer
     instance->module_data = data;
     cfg_free(config);
+
     return 0;
 }
 
@@ -180,6 +181,7 @@ int init(module_object *instance, module_callbacks *callbacks)
     if(SVReceiver_startThreadless(data->receiver) == NULL)
     {
          printf("ERROR: Starting SV receiver failed for interface %s\n", data->interface);
+         return -1;
     }
     return 0;
 }
@@ -187,7 +189,7 @@ int init(module_object *instance, module_callbacks *callbacks)
 int run(module_object *instance)
 {
     struct module_private_data * data = instance->module_data;
-    //SVReceiver_tick(data->receiver);
+    SVReceiver_tick(data->receiver);
     return 0;
 }
 
