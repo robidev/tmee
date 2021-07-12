@@ -161,6 +161,11 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     if(cfg_get_int(config,"input_count",&data->input_count) != 0) { return -1; }
 
+    //TODO calculate deadline for this module from test
+    int temp_deadline = 100;
+    cfg_get_int(config,"deadline",&temp_deadline);
+    instance->deadline = (long)temp_deadline;
+
     data->inputs = malloc(sizeof(data_inputs) * data->input_count);
     int i;
     for(i = 0; i < data->input_count; i++)
@@ -249,14 +254,12 @@ int init(module_object *instance, module_callbacks *callbacks)
     }
     //initialise receiver
     data->transmit_deadline = current_time() + (data->current_ttl/2);//schedule for half the ttl time
-
     return 0;
 }
 
 int run(module_object *instance)
 {
     struct module_private_data * data = instance->module_data;
-    printf("goose run\n");
     if(event(instance,42) != 1)//no stval change
     {
         //check time, if next retransmit is due
@@ -278,7 +281,6 @@ int run(module_object *instance)
 
 int event(module_object *instance, int event_id)
 {
-    printf("goose event %i\n", event_id);
     struct module_private_data * data = instance->module_data;
     //during operation
     int transmit_now = 0;
@@ -297,6 +299,7 @@ int event(module_object *instance, int event_id)
             if(diff > data->MAX_LAG) //if we start lagging more then MAX_LAG items, make a jump to the most recent value
             {
                 data->inputs[i]->old_index = current_index;//increment the last transmitted index
+                printf("ERROR: max lag(%i) was surpassed (difference: %i)\n",data->MAX_LAG, diff);
             }
             else
             {

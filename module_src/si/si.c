@@ -49,7 +49,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
     data->item_size = 0;
-    data->max_items = 10;//TODO: make it a setting
+    data->max_items = 10;
     data->buffer_index = -1;
     data->in = 0;
     data->fd = 0;
@@ -69,14 +69,22 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_int(config,"param_b",&data->param_b) != 0) { return -1; }
     printf("param a: %i, param b: %i\n", data->param_a, data->param_b);
 
+    if(cfg_get_int(config,"buffer_entries",&data->max_items) != 0) { return -1; }
+
     if(cfg_get_string(config, "input_file", &data->input_file) != 0) { return -1; }
     printf("Set input_file: %s\n", data->input_file);
 
     if(cfg_get_string(config, "output_file", &data->output_file) != 0) { return -1; }
     printf("Set output_file: %s\n", data->output_file);
 
+    //TODO calculate deadline for this module from test
+    int temp_deadline = 100;
+    cfg_get_int(config,"deadline",&temp_deadline);
+    instance->deadline = (long)temp_deadline;
+
     //create output file(s)
-    data->fd = open(data->output_file, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
+    remove(data->output_file);
+    data->fd = open(data->output_file, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
     if (data->fd < 0)
     {
         perror("open");
@@ -85,7 +93,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     unsigned char file_name_buf[256];
     sprintf(file_name_buf, "%s_config", data->output_file);
     printf("output config name: %s\n", file_name_buf);
-    data->fd_config = open(file_name_buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
+    remove(file_name_buf);
+    data->fd_config = open(file_name_buf, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
     if (data->fd_config == -1)
     {
         perror("open");
@@ -143,7 +152,6 @@ int init(module_object *instance, module_callbacks *callbacks)
 
 int run(module_object *instance)
 {
-    printf("SI run\n");
     event(instance, 42);
     return 0;
 }
@@ -151,8 +159,7 @@ int run(module_object *instance)
 int event(module_object *instance, int event_id)
 {
     struct module_private_data * data = instance->module_data;
-    printf("SI event called with id: %i\n", event_id);
-    //
+
     int index = read_index(data->input_buffer);
     if(data->old_index == index)
     {
@@ -163,7 +170,6 @@ int event(module_object *instance, int event_id)
     while(data->old_index != index)
     {
         int value = read_input_int32(data->input_buffer,data->old_index);
-        printf("data: %i\n",value);
 
         if(value > 100)// write trip output data
             write_output_bool(data->output_buffer,1);

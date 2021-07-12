@@ -76,7 +76,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
         return -1;
     }
 
-    if(cfg_get_int(config,"max_items",&data->max_items) != 0) { return -1; }
+    if(cfg_get_int(config,"buffer_entries",&data->max_items) != 0) { return -1; }
     
     if(cfg_get_string(config, "interface", &data->interface) != 0) { return -1; }
     printf("Set interface id: %s\n", data->interface);
@@ -98,8 +98,14 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_string(config, "output_file", &data->shm_name) != 0) { return -1; }
     printf("output shm name: %s\n", data->shm_name);
 
+    //TODO calculate deadline for this module from test
+    int temp_deadline = 100;
+    cfg_get_int(config,"deadline",&temp_deadline);
+    instance->deadline = (long)temp_deadline;
+
     //create/mmap output files
-    data->fd = open(data->shm_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
+    remove(data->shm_name);
+    data->fd = open(data->shm_name, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR );//shm_open(STORAGE_ID, O_RDWR, S_IRUSR | S_IWUSR);
     if (data->fd < 0)
     {
         perror("open");
@@ -108,7 +114,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     uint8_t file_name_buf[256];
     sprintf(file_name_buf, "%s_config", data->shm_name);
     printf("shm config name: %s\n", file_name_buf);
-    data->fd_config = open(file_name_buf, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
+    remove(file_name_buf);//remove existing file to prevent a permission error
+    data->fd_config = open(file_name_buf, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
     if (data->fd_config == -1)
     {
         perror("open");
@@ -183,6 +190,7 @@ int init(module_object *instance, module_callbacks *callbacks)
          printf("ERROR: Starting SV receiver failed for interface %s\n", data->interface);
          return -1;
     }
+
     return 0;
 }
 
@@ -251,7 +259,6 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
 
     data->buffer_index = (data->buffer_index + 1) % data->max_items;
 
-    printf("output_buffer index: %u\n", data->buffer_index);
     for(uint32_t i = 0; i < item_size_int; i += 1)
     {
         *( (data->output_buffer + 4) + (data->buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);

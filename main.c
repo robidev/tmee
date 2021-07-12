@@ -12,7 +12,6 @@
 
 //TODO
 //test function
-//implement 'break signals'
 //other timin-scheme (interrupt)
 
 int init_modules();
@@ -24,7 +23,7 @@ int run_callback_func(int event_id);
 long current_time();
 void run_asap();
 void run_deadline(long interval);
-void profile(long start,long end);
+void profile(char * scope, long start,long end);
 void test_modules();
 
 
@@ -168,6 +167,12 @@ int main(int argc, char ** argv)
         }        
         module_instance->config_file = module_config;
         
+        //check if module->run should be called during runtime, or only events should be active
+        module_instance->run_enabled=0;
+        sprintf(module_i, "module%d_register_run", module_index);
+        cfg_get_int(config, module_i, &module_instance->run_enabled);
+        printf("run is set to %d\n",module_instance->run_enabled);     
+
         //initialise deadline
         module_instance->deadline = -1; //deadline will be set by init;
 
@@ -255,8 +260,7 @@ int main(int argc, char ** argv)
     if(interval > 0)
     {
         //busy-wait loop
-        run_deadline(interval);
-        //TODO: also make interrupt version?        
+        run_deadline(interval);    
     }
     else
     {
@@ -409,7 +413,6 @@ int subscribe_event_id(int event_id, module_object *module)
 //call all mapped event items
 int run_callback_func(int event_id)
 {
-    printf("callback:%i\n", event_id);
     event_chain *chain = event_chains[event_id];
     while(chain)
     {
@@ -437,6 +440,9 @@ void run_asap()
         module_object * module;
         LIST_FOREACH(module, &registered_modules, next)
         {
+            if(module->run_enabled == 0)
+                continue;
+                    
             long start = current_time();
             if(module->run(module) != 0)
             {
@@ -447,9 +453,9 @@ void run_asap()
             {
                 printf("ERROR: module deadline(%li) overshot by %li\n",module->deadline, (end - start) - module->deadline);
             }
-            profile(start,end);//log timing of this run
+            profile(module->config_id,start,end);//log timing of this run
         }
-        profile(start_time, current_time());//log whole run time
+        profile("overall",start_time, current_time());//log whole run time
     }
 }
 
@@ -475,6 +481,9 @@ void run_deadline(long interval)
             module_object * module;
             LIST_FOREACH(module, &registered_modules, next)
             {
+                if(module->run_enabled == 0)
+                    continue;
+
                 long start = current_time();
                 if(module->run(module) != 0)
                 {
@@ -485,10 +494,10 @@ void run_deadline(long interval)
                 {
                     printf("ERROR: module deadline(%li) overshot by %li\n",module->deadline, (end - start) - module->deadline);
                 }
-                profile(start,end);//log timing of this run
+                profile(module->config_id,start,end);//log timing of this run
             }
             long end_time = current_time();
-            profile(start_time, end_time);//log whole run time
+            profile("overall",start_time, end_time);//log whole run time
 
             //check next deadline criteria
             long spare = next_deadline - (end_time + slack);
@@ -508,9 +517,9 @@ void run_deadline(long interval)
 }
 
 
-void profile(long start,long end)
+void profile(char * scope, long start,long end)
 {
-    printf("start: %li end: %li\n", start,end);
+    printf("%s - start: %li end: %li\n", scope, start,end);
 }
 
 void test_modules()

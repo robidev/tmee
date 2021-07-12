@@ -35,6 +35,7 @@ struct _module_object {
     char *config_id;
     char * config_file;
     long deadline;
+    int run_enabled;
     LIST_ENTRY(_module_object) next;
 };
 
