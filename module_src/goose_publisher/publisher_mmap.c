@@ -224,7 +224,7 @@ int init(module_object *instance, module_callbacks *callbacks)
     GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
     GoosePublisher_setConfRev(data->publisher, data->confrev);
     GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
-    GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl);
+    GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl/1000);
    
     data->dataSetValues = LinkedList_create();
     for(i = 0; i < data->input_count; i++)
@@ -272,7 +272,7 @@ int run(module_object *instance)
             }
             data->transmit_deadline += data->current_ttl / 2;//schedule for half the ttl time
 
-            GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl);
+            GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl/1000);
             GoosePublisher_publish(data->publisher, data->dataSetValues);
         }
     }
@@ -303,7 +303,7 @@ int event(module_object *instance, int event_id)
             }
             else
             {
-                data->inputs[i]->old_index++;//increment the last transmitted index
+                data->inputs[i]->old_index = (data->inputs[i]->old_index + 1) % read_items(data->inputs[i]->buffer);//increment the last transmitted index
             }
             //update the mms value in the linked list
             data->inputs[i]->update_function(data->inputs[i]->element, data->inputs[i]->buffer, data->inputs[i]->old_index); 
@@ -315,7 +315,7 @@ int event(module_object *instance, int event_id)
 
         data->current_ttl = data->GOOSE_FAST_RETRANSMIT_TTL;
         data->transmit_deadline += data->GOOSE_FAST_RETRANSMIT_TTL / 2;//schedule for half the ttl time
-        GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl);
+        GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl/1000);
 
         GoosePublisher_publish(data->publisher, data->dataSetValues);
 

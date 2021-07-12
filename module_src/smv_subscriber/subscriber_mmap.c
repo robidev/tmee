@@ -255,17 +255,17 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
         printf("packet size mismatch\n");
         return;//only skip this packet
     }
-    uint32_t item_size_int = data->item_size / 4;
+    register uint32_t item_size = data->item_size;
 
     data->buffer_index = (data->buffer_index + 1) % data->max_items;
 
-    for(uint32_t i = 0; i < item_size_int; i += 1)
+    for(uint32_t i = 0; i < item_size; i += 4)
     {
-        *( (data->output_buffer + 4) + (data->buffer_index * (item_size_int + 1)) + i) = SVSubscriber_ASDU_getINT32(asdu, i*4);
+        *( (data->output_buffer + 16) + (data->buffer_index * (item_size + 4)) + i) = SVSubscriber_ASDU_getINT32(asdu, i);
     }
-    *( (data->output_buffer + 4) + (data->buffer_index * (item_size_int + 1)) + item_size_int) = SVSubscriber_ASDU_getSmpCnt(asdu);
+    *( (data->output_buffer + 16) + (data->buffer_index * (item_size + 4)) + item_size) = SVSubscriber_ASDU_getSmpCnt(asdu);
     //update the output_buffer index
-    *(data->output_buffer + 2) = data->buffer_index;
+    *(data->output_buffer + 8) = data->buffer_index;
    
     //call all registered callbacks
     data->callbacks->callback_event_cb(data->sample_received_id);

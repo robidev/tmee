@@ -170,13 +170,14 @@ int event(module_object *instance, int event_id)
     while(data->old_index != index)
     {
         int value = read_input_int32(data->input_buffer,data->old_index);
+        //printf("%d\n",value);
 
         if(value > 100)// write trip output data
             write_output_bool(data->output_buffer,1);
         else
             write_output_bool(data->output_buffer,0);
 
-        data->old_index++;
+        data->old_index = (data->old_index + 1) % read_items(data->input_buffer);
     }  
     //call all registered callbacks
     data->callbacks->callback_event_cb(data->trip_value_changed_id);

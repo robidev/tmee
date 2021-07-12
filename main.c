@@ -455,7 +455,7 @@ void run_asap()
             }
             profile(module->config_id,start,end);//log timing of this run
         }
-        profile("overall",start_time, current_time());//log whole run time
+        profile("--- overall ---",start_time, current_time());//log whole run time
     }
 }
 
@@ -497,7 +497,7 @@ void run_deadline(long interval)
                 profile(module->config_id,start,end);//log timing of this run
             }
             long end_time = current_time();
-            profile("overall",start_time, end_time);//log whole run time
+            profile("--- overall ---",start_time, end_time);//log whole run time
 
             //check next deadline criteria
             long spare = next_deadline - (end_time + slack);

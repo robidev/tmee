@@ -291,7 +291,7 @@ inline int write_output_int(char * buffer, int value)
 int write_output_bool(char * buffer, char value)
 {
     int *tmp = (int *)buffer;
-    if(read_type(buffer) != INT32 || read_size(buffer) != 4) return -1;
+    if(read_type(buffer) != BOOL || read_size(buffer) != 1) return -1;
     int items = read_items(buffer);
 
     lock_buffer(buffer,1);
@@ -306,7 +306,7 @@ int write_output_bool(char * buffer, char value)
 int write_output_int8(char * buffer, char value)
 {
     int *tmp = (int *)buffer;
-    if(read_type(buffer) != INT32 || read_size(buffer) != 4) return -1;
+    if(read_type(buffer) != INT8 || read_size(buffer) != 1) return -1;
     int items = read_items(buffer);
 
     lock_buffer(buffer,1);
