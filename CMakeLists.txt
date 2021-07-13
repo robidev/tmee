@@ -59,5 +59,5 @@ target_link_libraries (tmee
 )
 
 install(TARGETS tmee
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    RUNTIME DESTINATION bin ${CMAKE_INSTALL_BINDIR}
 )
