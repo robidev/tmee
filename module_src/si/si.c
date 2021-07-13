@@ -37,7 +37,7 @@ struct module_private_data {
     int fd;
     int fd_config;
     int old_index;
-
+    char trip;
 };
 
 const char event_id[] = "TRIP_VALUE_CHANGE";
@@ -57,7 +57,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     data->input_file = 0;
     data->output_file = 0;
-
+    data->trip = 0;
 
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
@@ -169,13 +169,25 @@ int event(module_object *instance, int event_id)
     // new data from input
     while(data->old_index != index)
     {
-        int value = read_input_int32(data->input_buffer,data->old_index);
-        //printf("%d\n",value);
+        int value = read_input_smv(data->input_buffer,0,data->old_index);
+        printf("%i: %i\n", data->old_index, value);
 
-        if(value > 100)// write trip output data
-            write_output_bool(data->output_buffer,1);
+        if(value > 0)// write trip output data
+        {
+            if(data->trip == 0)
+            {
+                data->trip = 1;
+                write_output_bool(data->output_buffer,1);
+            }
+        }
         else
-            write_output_bool(data->output_buffer,0);
+        {
+            if(data->trip == 1)
+            {
+                data->trip = 0;
+                write_output_bool(data->output_buffer,0);
+            }
+        }
 
         data->old_index = (data->old_index + 1) % read_items(data->input_buffer);
     }  

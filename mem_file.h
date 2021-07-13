@@ -20,6 +20,7 @@ int read_type(char * buffer);
 char read_input_bool(char * buffer, int index);
 char read_input_int8(char * buffer, int index);
 int read_input_int32(char * buffer, int index);
+int read_input_smv(char * buffer, int var_index, int index);
 
 int write_type(char *buffer, short type);
 int write_size(char *buffer, int size);

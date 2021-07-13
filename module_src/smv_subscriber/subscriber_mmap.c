@@ -143,7 +143,7 @@ int init(module_object *instance, module_callbacks *callbacks)
 
     //allocate mmaped buffer
     data->item_size = type_to_item_size(SMV92);
-    data->output_buffer_size = calculate_buffer_size(data->item_size + 4, data->max_items);
+    data->output_buffer_size = calculate_buffer_size(data->item_size, data->max_items);
     // allocate size in file
     if(ftruncate(data->fd, data->output_buffer_size + 10) != 0) 
     {
@@ -152,10 +152,11 @@ int init(module_object *instance, module_callbacks *callbacks)
     }
     data->output_buffer = mmap_fd_write(data->fd, data->output_buffer_size);
 
-    write_type(data->output_buffer, SMV92);
+
     write_size(data->output_buffer,data->item_size);
     write_items(data->output_buffer,data->max_items);
     write_index(data->output_buffer,0);
+    write_type(data->output_buffer, SMV92);
 
     //initialise receiver
     uint8_t bb[1024] = "";
@@ -250,7 +251,7 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
 
     uint32_t data_size = SVSubscriber_ASDU_getDataSize(asdu);
 
-    if(data->item_size != data_size)
+    if(data->item_size != data_size + 4)
     {
         printf("packet size mismatch\n");
         return;//only skip this packet
@@ -259,11 +260,12 @@ svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU as
 
     data->buffer_index = (data->buffer_index + 1) % data->max_items;
 
-    for(uint32_t i = 0; i < item_size; i += 4)
+    for(uint32_t i = 0; i < data_size; i += 4)
     {
-        *( (data->output_buffer + 16) + (data->buffer_index * (item_size + 4)) + i) = SVSubscriber_ASDU_getINT32(asdu, i);
+        *(int *)( (data->output_buffer + 16) + (data->buffer_index * (item_size)) + i) = SVSubscriber_ASDU_getINT32(asdu, i);
     }
-    *( (data->output_buffer + 16) + (data->buffer_index * (item_size + 4)) + item_size) = SVSubscriber_ASDU_getSmpCnt(asdu);
+    int smpCnt = (int)SVSubscriber_ASDU_getSmpCnt(asdu);
+    *(int *)( (data->output_buffer + 16) + (data->buffer_index * (item_size)) + data_size) = smpCnt;
     //update the output_buffer index
     *(data->output_buffer + 8) = data->buffer_index;
    

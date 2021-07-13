@@ -16,6 +16,6 @@
 #define BINTIME     13 // item size = 4?
 #define UTCTIME     14 // item size = 4?
 
-#define SMV92       64 // item size = 64
+#define SMV92       68 // item size = 64
 
 #endif  // types_h__

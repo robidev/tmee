@@ -519,7 +519,7 @@ void run_deadline(long interval)
 
 void profile(char * scope, long start,long end)
 {
-    printf("%s - start: %li end: %li\n", scope, start,end);
+    //printf("%s - start: %li end: %li\n", scope, start,end);
 }
 
 void test_modules()

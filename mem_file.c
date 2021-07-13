@@ -88,7 +88,7 @@ int munmap_file(char * buffer, int size) // return char* to buffer
 
 int calculate_buffer_size(int item_size, int max_items)
 {
-    return 16 + item_size*max_items;
+    return 16 + (item_size * max_items);
 }
 
 int calculate_buffer_size_from_file(int fd) //calulate buffer size before the file is mmapped
@@ -133,7 +133,7 @@ inline int type_to_item_size(int type)
         case QUALITY:
             return 4;
         case SMV92:
-            return 64;
+            return 68;
         default:
             return 0;
     }
@@ -194,7 +194,7 @@ inline int free_buffer_lock(char * buffer)
 inline char read_input_bool(char * buffer, int index)
 {
     lock_buffer(buffer,1);
-    register char result = buffer[index];
+    register char result = buffer[index + 16];
     free_buffer_lock(buffer);
     return result;
 }
@@ -202,7 +202,7 @@ inline char read_input_bool(char * buffer, int index)
 inline char read_input_int8(char * buffer, int index)
 {
     lock_buffer(buffer,1);
-    register char result =  buffer[index];
+    register char result =  buffer[index + 16];
     free_buffer_lock(buffer);
     return result;
 }
@@ -211,7 +211,16 @@ inline int read_input_int32(char * buffer, int index)
 {
     int *tmp = (int *)buffer;
     lock_buffer(buffer,1);
-    register int result = tmp[index];
+    register int result = tmp[index + 4];
+    free_buffer_lock(buffer);
+    return result;
+}
+
+inline int read_input_smv(char * buffer, int var_index, int index)
+{
+    int *tmp = (int *)buffer;
+    lock_buffer(buffer,1);
+    register int result = tmp[4+ (index * 17) + var_index];
     free_buffer_lock(buffer);
     return result;
 }
@@ -219,7 +228,7 @@ inline int read_input_int32(char * buffer, int index)
 inline char read_current_input_bool(char * buffer)
 {
     lock_buffer(buffer,1);
-    register char result = buffer[read_index(buffer)];
+    register char result = buffer[read_index(buffer) + 16];
     free_buffer_lock(buffer);
     return result;
 }
@@ -227,7 +236,7 @@ inline char read_current_input_bool(char * buffer)
 inline char read_current_input_int8(char * buffer)
 {
     lock_buffer(buffer,1);
-    register char result =  buffer[read_index(buffer)];
+    register char result =  buffer[read_index(buffer) + 16];
     free_buffer_lock(buffer);
     return result;
 }
@@ -236,7 +245,7 @@ inline int read_current_input_int32(char * buffer)
 {
     int *tmp = (int *)buffer;
     lock_buffer(buffer,1);
-    register int result = tmp[tmp[2]];//tmp[2] == index
+    register int result = tmp[tmp[2] + 4];//tmp[2] == index
     free_buffer_lock(buffer);
     return result;
 }
