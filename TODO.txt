@@ -1,0 +1,8 @@
+write ipc in c
+write goose subscriber in c
+write smv publisher in c
+write mms_server in c
+write python example (zmq and file support)
+write lib60870 slave (map IOA on files) python?
+implement deadline-benchmarks and code-cov testing
+implement fast logging

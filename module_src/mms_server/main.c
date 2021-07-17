@@ -55,10 +55,33 @@ int init(module_object *instance, module_callbacks *callbacks)
 {
     printf("init\n");
     struct module_private_data * data = instance->module_data;
-
+    //register for read/write callbacks
+    //
 
     return 0;
 }
+
+//read-callback
+int read_value()
+{   
+    //foreacht(registered_value in values)
+    //if element==registered_value
+    //  get info from file, and write into model
+    //
+    return 0; 
+}
+
+//write-callback
+int write_value()
+{   
+    //foreacht(registered_value in values)
+    //if element==registered_value
+    //  write data into file
+    //  update model
+    //
+    return 0; 
+}
+
 
 int run(module_object *instance)
 {
