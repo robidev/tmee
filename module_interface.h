@@ -18,6 +18,7 @@ typedef int (*deinit_func)(module_object *instance);
 typedef int (*register_event_func)(const char *event_name);
 typedef int (*callback_event_func)(int id);
 //typedef int (*register_callback_func)(int event_id, module_object *module);
+typedef char *(*find_event_func)(int id);
 
 // structures used for the module and callbacks
 struct _module_object {
@@ -43,6 +44,7 @@ struct _module_callbacks {
     register_event_func register_event_cb;
     callback_event_func callback_event_cb;
     //register_callback_func register_callback_cb;
+    find_event_func find_event_name_cb;
 };
 
 

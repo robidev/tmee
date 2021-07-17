@@ -52,7 +52,8 @@ set_target_properties(ipc PROPERTIES VERSION ${PROJECT_VERSION})
 #)
 
 target_link_libraries (ipc
-
+   czmq 
+   zmq
 )
 
 install(TARGETS ipc
