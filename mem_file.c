@@ -134,6 +134,8 @@ inline int type_to_item_size(int type)
             return 4;
         case SMV92:
             return 68;
+        case GOOSE:
+            return 1024;
         default:
             return 0;
     }

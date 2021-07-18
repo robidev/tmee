@@ -1,5 +1,6 @@
 #include <libiec61850/hal_thread.h>
-#include <libiec61850/sv_subscriber.h>
+#include <libiec61850/goose_subscriber.h>
+#include <libiec61850/goose_receiver.h>
 #include "../../module_interface.h"
 #include "cfg_parse.h"
 #include "types.h"
@@ -18,18 +19,18 @@
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
 /*              size    value
-item_size       4       64(8x int+q ) + 4(SmpCnt) = 68
-max_items       4       4000
+item_size       4       ...
+max_items       4       10
 index           4       0
-semaphore+type  4       0/1 + smv
-buffer[]        68*4000 [data_items+smpcnt]
+semaphore+type  4       0/1 + goose
+buffer[]        
 */
 
 
 struct module_private_data {
-    int sample_received_id;
-    SVReceiver receiver;
-    SVSubscriber subscriber;
+    int goose_received_id;
+    GooseReceiver receiver;
+    GooseSubscriber subscriber;
     module_callbacks *callbacks;
 
     uint32_t item_size;
@@ -44,17 +45,20 @@ struct module_private_data {
     char * shm_name;
     unsigned short appid;
     unsigned char * dstMac;
+    char * goCbRef;
+
+    int old_stNum;
     uint8_t MAC[6];
 };
 
-const char event_id[] = "SAMPLE_RECEIVED";
+const char event_id[] = "GOOSE_RECEIVED";
 
 static void
-svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU asdu);
+gooseListener(GooseSubscriber subscriber, void* parameter);
 
 int pre_init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("smv pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
+    printf("goose pre-init id: %s, config: %s\n", instance->config_id, instance->config_file);
 
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
@@ -68,6 +72,8 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->shm_name = 0;
     data->appid = 0x4000;
     data->dstMac = NULL;
+    data->goCbRef = 0;
+    data->old_stNum = 0;
 
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
@@ -80,6 +86,9 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     
     if(cfg_get_string(config, "interface", &data->interface) != 0) { return -1; }
     printf("Set interface id: %s\n", data->interface);
+
+    if(cfg_get_string(config, "gocbref", &data->goCbRef) != 0) { return -1; }
+    printf("Set gocbref: %s\n", data->goCbRef);
 
     if(cfg_get_hex(config, "appid", &data->appid) != 0) { return -1; }
     printf("appid: 0x%.4x\n", data->appid);
@@ -126,7 +135,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     int len = strlen(instance->config_id) + strlen(event_id) + 10;
     char event_string[len]; 
     sprintf(event_string, "%s_%s",instance->config_id, event_id);
-    data->sample_received_id = callbacks->register_event_cb(event_string);
+    data->goose_received_id = callbacks->register_event_cb(event_string);
 
     data->callbacks = callbacks;
     //store module data in pointer
@@ -138,11 +147,11 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
 int init(module_object *instance, module_callbacks *callbacks)
 {
-    printf("smv init\n");
+    printf("goose init\n");
     struct module_private_data * data = instance->module_data;
 
     //allocate mmaped buffer
-    data->item_size = type_to_item_size(SMV92);
+    data->item_size = type_to_item_size(GOOSE);
     data->output_buffer_size = calculate_buffer_size(data->item_size, data->max_items);
     // allocate size in file
     if(ftruncate(data->fd, data->output_buffer_size + 10) != 0) 
@@ -156,13 +165,13 @@ int init(module_object *instance, module_callbacks *callbacks)
     write_size(data->output_buffer,data->item_size);
     write_items(data->output_buffer,data->max_items);
     write_index(data->output_buffer,0);
-    write_type(data->output_buffer, SMV92);
+    write_type(data->output_buffer, GOOSE);
 
     //initialise receiver
     uint8_t bb[1024] = "";
-    data->receiver = SVReceiver_create();
+    data->receiver = GooseReceiver_create();
 
-    SVReceiver_setInterfaceId(data->receiver, data->interface);
+    GooseReceiver_setInterfaceId(data->receiver, data->interface);
 
     sprintf(bb, "eth=%s\nshm name=%s\n",data->interface, data->shm_name);
     write(data->fd_config, bb, strlen(bb));    
@@ -176,17 +185,20 @@ int init(module_object *instance, module_callbacks *callbacks)
     write(data->fd_config, bb, strlen(bb));  
 
     /* Create a subscriber listening to SV messages with APPID 0x-xxxx */
-    data->subscriber = SVSubscriber_create(data->dstMac, data->appid);
+    data->subscriber = GooseSubscriber_create(data->goCbRef, NULL);
+
+    GooseSubscriber_setDstMac(data->subscriber, data->dstMac);
+    GooseSubscriber_setAppId(data->subscriber, data->appid);
 
     /* Install a callback handler for the subscriber */
-    SVSubscriber_setListener(data->subscriber, svUpdateListener, instance);
+    GooseSubscriber_setListener(data->subscriber, gooseListener, instance);
 
     /* Connect the subscriber to the receiver */
-    SVReceiver_addSubscriber(data->receiver, data->subscriber);
+    GooseReceiver_addSubscriber(data->receiver, data->subscriber);
 
     /* Start listening to SV messages - starts a new receiver background thread */
     //SVReceiver_start(data->receiver);
-    if(SVReceiver_startThreadless(data->receiver) == NULL)
+    if(GooseReceiver_startThreadless(data->receiver) == NULL)
     {
          printf("ERROR: Starting SV receiver failed for interface %s\n", data->interface);
          return -1;
@@ -198,41 +210,42 @@ int init(module_object *instance, module_callbacks *callbacks)
 int run(module_object *instance)
 {
     struct module_private_data * data = instance->module_data;
-    SVReceiver_tick(data->receiver);
+    GooseReceiver_tick(data->receiver);
     return 0;
 }
 
 int event(module_object *instance, int event_id)
 {
-    printf("smv event id: %i\n", event_id);
+    printf("goose event id: %i\n", event_id);
     return 0;
 }
 
 //called to generate real-time performance metrics on this machine
 int test(void)
 {
-    printf("smv test\n");
+    printf("goose test\n");
     return 0;
 }
 
 
 int deinit(module_object *instance)
 {
-    printf("smv deinit\n");
+    printf("goose deinit\n");
     struct module_private_data * data = instance->module_data;
 
     /* Stop listening to SV messages */
     //SVReceiver_stop(data->receiver);
-    SVReceiver_stopThreadless(data->receiver);
+    GooseReceiver_stopThreadless(data->receiver);
 
     /* Cleanup and free resources */
-    SVReceiver_destroy(data->receiver);
+    GooseReceiver_destroy(data->receiver);
 
     close(data->fd);
     close(data->fd_config);
 
     munmap(data->output_buffer, data->output_buffer_size);
 
+    free(data->goCbRef);
     free(data->interface);
     free(data->shm_name);
 
@@ -244,33 +257,42 @@ int deinit(module_object *instance)
 
 /* Callback handler for received SV messages */
 static void
-svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU asdu)
+gooseListener (GooseSubscriber subscriber, void* parameter)
 {
     module_object *instance = parameter;
     struct module_private_data * data = instance->module_data;
 
-    uint32_t data_size = SVSubscriber_ASDU_getDataSize(asdu);
+    //printf("GOOSE event:\n");
+    //printf("  stNum: %u sqNum: %u\n", GooseSubscriber_getStNum(subscriber),
+    //        GooseSubscriber_getSqNum(subscriber));
+    //printf("  timeToLive: %u\n", GooseSubscriber_getTimeAllowedToLive(subscriber));
 
-    if(data->item_size != data_size + 4)
+    //uint64_t timestamp = GooseSubscriber_getTimestamp(subscriber);
+
+    //printf("  timestamp: %u.%u\n", (uint32_t) (timestamp / 1000), (uint32_t) (timestamp % 1000));
+    //printf("  message is %s\n", GooseSubscriber_isValid(subscriber) ? "valid" : "INVALID");
+
+    int stNum = GooseSubscriber_getStNum(subscriber);
+
+    if(stNum != data->old_stNum)
     {
-        printf("packet size mismatch\n");
-        return;//only skip this packet
-    }
-    register uint32_t item_size = data->item_size;
+        data->old_stNum = stNum;
 
-    data->buffer_index = (data->buffer_index + 1) % data->max_items;
+        MmsValue* values = GooseSubscriber_getDataSetValues(subscriber);
 
-    for(uint32_t i = 0; i < data_size; i += 4)
-    {
-        *(int *)( (data->output_buffer + 16) + (data->buffer_index * (item_size)) + i) = SVSubscriber_ASDU_getINT32(asdu, i);
+        register uint32_t item_size = data->item_size;
+
+        data->buffer_index = (data->buffer_index + 1) % data->max_items;
+
+        MmsValue_printToBuffer(values, (data->output_buffer + 16) + (data->buffer_index * (item_size)), 1024);
+
+        //update the output_buffer index
+        *(data->output_buffer + 8) = data->buffer_index;
+    
+        //call all registered callbacks
+        data->callbacks->callback_event_cb(data->goose_received_id);
     }
-    int smpCnt = (int)SVSubscriber_ASDU_getSmpCnt(asdu);
-    *(int *)( (data->output_buffer + 16) + (data->buffer_index * (item_size)) + data_size) = smpCnt;
-    //update the output_buffer index
-    *(data->output_buffer + 8) = data->buffer_index;
-   
-    //call all registered callbacks
-    data->callbacks->callback_event_cb(data->sample_received_id);
+
 }
 
 
