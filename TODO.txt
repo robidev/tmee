@@ -1,8 +1,12 @@
-write ipc in c
-write goose subscriber in c
-write smv publisher in c
-write mms_server in c
-write python example (zmq and file support)
-write lib60870 slave (map IOA on files) python?
-implement deadline-benchmarks and code-cov testing
-implement fast logging
+engine:
+  implement deadline-benchmarks and code-cov testing
+  implement fast logging
+
+core modules:
+  write ipc in c
+  write mms_server in c
+  improve goose subscriber in c to allow writing to multiple files
+
+python:
+  write lib60870 perhiperal(controller vs perhiperal) python example (zmq and file support, map IOA on files)
+

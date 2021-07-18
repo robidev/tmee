@@ -39,7 +39,7 @@ typedef struct _data_inputs {
 
 struct module_private_data {
     module_callbacks *callbacks;
-    CommParameters gooseCommParameters;
+    CommParameters smvCommParameters;
     GoosePublisher publisher;
     LinkedList dataSetValues;
 
@@ -65,7 +65,7 @@ struct module_private_data {
     int ndscomm;
     int ttl;//in miliseconds
 
-    int current_ttl;//in miliseconds
+    int interval;//in miliseconds
     long transmit_deadline;
     int GOOSE_FAST_RETRANSMIT_TTL;
     int MAX_LAG;
@@ -154,7 +154,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     if(cfg_get_int(config,"simulation",&data->simulation) != 0) { return -1; }
     if(cfg_get_int(config,"ndscomm",&data->ndscomm) != 0) { return -1; }
     if(cfg_get_int(config,"ttl",&data->ttl) != 0) { return -1; }
-    data->current_ttl = data->ttl;//start with slow retransmit
+    data->interval = data->ttl;//start with slow retransmit
     if(cfg_get_int(config,"GOOSE_FAST_RETRANSMIT_TTL",&data->GOOSE_FAST_RETRANSMIT_TTL) != 0) { return -1; }
     if(cfg_get_int(config,"MAX_LAG",&data->MAX_LAG) != 0) { return -1; }
 
@@ -205,17 +205,17 @@ int init(module_object *instance, module_callbacks *callbacks)
         data->inputs[i]->old_index = 0;
     }
 
-    data->gooseCommParameters.appId = data->appid;
-    data->gooseCommParameters.dstAddress[0] = data->dstMAC[0];
-    data->gooseCommParameters.dstAddress[1] = data->dstMAC[1];
-    data->gooseCommParameters.dstAddress[2] = data->dstMAC[2];
-    data->gooseCommParameters.dstAddress[3] = data->dstMAC[3];
-    data->gooseCommParameters.dstAddress[4] = data->dstMAC[4];
-    data->gooseCommParameters.dstAddress[5] = data->dstMAC[5];
-    data->gooseCommParameters.vlanId = data->vlanid;
-    data->gooseCommParameters.vlanPriority = data->vlanprio;
+    data->smvCommParameters.appId = data->appid;
+    data->smvCommParameters.dstAddress[0] = data->dstMAC[0];
+    data->smvCommParameters.dstAddress[1] = data->dstMAC[1];
+    data->smvCommParameters.dstAddress[2] = data->dstMAC[2];
+    data->smvCommParameters.dstAddress[3] = data->dstMAC[3];
+    data->smvCommParameters.dstAddress[4] = data->dstMAC[4];
+    data->smvCommParameters.dstAddress[5] = data->dstMAC[5];
+    data->smvCommParameters.vlanId = data->vlanid;
+    data->smvCommParameters.vlanPriority = data->vlanprio;
 
-    data->publisher = GoosePublisher_create(&data->gooseCommParameters, data->interface);
+    data->publisher = GoosePublisher_create(&data->smvCommParameters, data->interface);
 
     if(data->publisher == NULL) {
         printf("ERROR: could not create GOOSE publisher\n");
@@ -224,7 +224,7 @@ int init(module_object *instance, module_callbacks *callbacks)
     GoosePublisher_setGoCbRef(data->publisher, data->gocbref);
     GoosePublisher_setConfRev(data->publisher, data->confrev);
     GoosePublisher_setDataSetRef(data->publisher, data->datasetref);
-    GoosePublisher_setTimeAllowedToLive(data->publisher, data->current_ttl/1000);
+    GoosePublisher_setTimeAllowedToLive(data->publisher, data->interval/1000);
    
     data->dataSetValues = LinkedList_create();
     for(i = 0; i < data->input_count; i++)
@@ -253,7 +253,7 @@ int init(module_object *instance, module_callbacks *callbacks)
         }
     }
     //initialise receiver
-    data->transmit_deadline = current_time() + (data->current_ttl/2);//schedule for half the ttl time
+    data->transmit_deadline = current_time() + (data->interval/2);//schedule for half the ttl time
     return 0;
 }
 
@@ -265,14 +265,14 @@ int run(module_object *instance)
         //check time, if next retransmit is due
         if(current_time() >= data->transmit_deadline)
         {
-            data->current_ttl = data->current_ttl * 2;
-            if(data->current_ttl > data->ttl)
+            data->interval = data->interval * 2;
+            if(data->interval > data->ttl)
             {
-                data->current_ttl = data->ttl;
+                data->interval = data->ttl;
             }
-            data->transmit_deadline += data->current_ttl / 2;//schedule for half the ttl time
+            data->transmit_deadline += data->interval / 2;//schedule for half the ttl time
 
-            GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl/1000);
+            GoosePublisher_setTimeAllowedToLive(data->publisher,data->interval/1000);
             GoosePublisher_publish(data->publisher, data->dataSetValues);
         }
     }
@@ -313,9 +313,9 @@ int event(module_object *instance, int event_id)
     {
         GoosePublisher_increaseStNum(data->publisher);
 
-        data->current_ttl = data->GOOSE_FAST_RETRANSMIT_TTL;
+        data->interval = data->GOOSE_FAST_RETRANSMIT_TTL;
         data->transmit_deadline += data->GOOSE_FAST_RETRANSMIT_TTL / 2;//schedule for half the ttl time
-        GoosePublisher_setTimeAllowedToLive(data->publisher,data->current_ttl/1000);
+        GoosePublisher_setTimeAllowedToLive(data->publisher,data->interval/1000);
 
         GoosePublisher_publish(data->publisher, data->dataSetValues);
 
