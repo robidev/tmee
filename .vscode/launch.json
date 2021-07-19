@@ -11,7 +11,7 @@
             "program": "tmee",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
             "miDebuggerPath": "/home/user/gdb",

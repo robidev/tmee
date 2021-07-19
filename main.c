@@ -19,6 +19,7 @@ void clean_all();
 void unload_modules();
 int register_event_id(const char *event_name);
 int subscribe_event_id(int event_id, module_object *module);
+char *find_event_name(int id);
 int run_callback_func(int event_id);
 long current_time();
 void run_asap();
@@ -89,6 +90,7 @@ int main(int argc, char ** argv)
     //load callbacks
     callbacks.callback_event_cb = run_callback_func;
     callbacks.register_event_cb = register_event_id;
+    callbacks.find_event_name_cb = find_event_name;
 
     //load modules
     if(cfg_get_int(config,"module_count",&modules) != 0)
@@ -413,6 +415,9 @@ int subscribe_event_id(int event_id, module_object *module)
 //call all mapped event items
 int run_callback_func(int event_id)
 {
+    if(event_id >= MAX_EVENT_IDS || event_id < 0)
+        return -1;
+
     event_chain *chain = event_chains[event_id];
     while(chain)
     {

@@ -11,7 +11,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
-
+#include <math.h>
+#include <sys/time.h>
 
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
@@ -38,9 +39,22 @@ struct module_private_data {
     int fd_config;
     int old_index;
     char trip;
+
+    int is_recording;
+    float total;
+    float sample_count;
+    long start_time;
+    int vector;
 };
 
 const char event_id[] = "TRIP_VALUE_CHANGE";
+
+long current_time()
+{
+    struct timeval timecheck;
+    gettimeofday(&timecheck, NULL);
+    return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
+}
 
 int pre_init(module_object *instance, module_callbacks *callbacks)
 {
@@ -58,6 +72,9 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     data->input_file = 0;
     data->output_file = 0;
     data->trip = 0;
+    data->is_recording = 0;
+    data->vector = 80; //80 samples per cycle
+
 
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
@@ -169,30 +186,73 @@ int event(module_object *instance, int event_id)
     // new data from input
     while(data->old_index != index)
     {
-        int value = read_input_smv(data->input_buffer,0,data->old_index);
-        printf("%i: %i\n", data->old_index, value);
-
-        if(value > 0)// write trip output data
+        if(data->trip == 1) // dont calculate if we have tripped until reset
         {
-            if(data->trip == 0)
-            {
-                data->trip = 1;
-                write_output_bool(data->output_buffer,1);
-            }
+            return 0;
         }
-        else
-        {
-            if(data->trip == 1)
-            {
-                data->trip = 0;
-                write_output_bool(data->output_buffer,0);
-            }
-        }
+               //   si       VI  EI  LTI
+        float a = 0.02; //    1,  2,   1
+        float k = 0.14; // 13,5, 80, 120
 
+        float c = 0; //fixed for all IEC curves
+        float P = 1; //fixed for all IEC curves
+
+        float time_dial = data->param_a; //time dial setting (2)
+        float treshold = data->param_b; // treshold current  (800)
+
+
+        //calculate RMS
+        int i;
+        float total = 0;
+
+        //TODO: improve this by adding the newest sample, and removing the 80th
+        for(i=0; i<data->vector; i++)
+        {
+            // measured current for vector amount of samples
+            float current = (float)read_input_smv(data->input_buffer,0, (data->old_index - i) % data->max_items);
+            total += pow(current,2);
+        }
+        float current_rms = sqrt(total/(float)data->vector);
+        //float current_rms = current;
+
+        //calculate pickup
+        if(current_rms > treshold && data->is_recording == 0)// start recording
+        {
+            data->start_time=current_time();
+            data->total=0;
+            data->sample_count=0;
+            data->is_recording=1;
+        }
+        //calculate trip
+        if(data->is_recording)
+        {
+            data->total += current_rms;
+            data->sample_count++;
+        
+            float average_current = data->total/data->sample_count;
+
+            if(average_current > treshold)// if the average current is larger then the treshold (and stays there)
+            {
+                //calculate time to trip for average current
+                float trip_time = time_dial * ((k / (pow( ( average_current/treshold ), a) - P) ) + c); 
+
+                // check if the time that the average value is above the treshold value, is longer then the SI trip time
+                if((data->start_time - current_time()) > trip_time)
+                {
+                    //trip!
+                    data->trip = 1;
+                    write_output_bool(data->output_buffer,1);
+                    //call all registered callbacks
+                    data->callbacks->callback_event_cb(data->trip_value_changed_id);
+                }
+            }
+            else //current average is below treshold, so reset pickup
+            {
+                data->is_recording = 0;
+            }  
+        }
         data->old_index = (data->old_index + 1) % read_items(data->input_buffer);
     }  
-    //call all registered callbacks
-    data->callbacks->callback_event_cb(data->trip_value_changed_id);
     return 0;
 }
 
