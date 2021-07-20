@@ -7,7 +7,7 @@ if(DEFINED ENV{TOOLCHAIN})
     set(CMAKE_AR	"$ENV{TOOLCHAIN}ar" CACHE FILEPATH "CW archiver" FORCE)
 endif()
 
-project(module_template)
+project(mms_server)
 
 ENABLE_TESTING()
 
@@ -33,7 +33,7 @@ include_directories(
 
 #SET(CMAKE_EXE_LINKER_FLAGS "-static")   
 
-set(module_template_SRCS
+set(mms_server_SRCS
    cfg_parse.c
    mem_file.c
    main.c
@@ -41,21 +41,24 @@ set(module_template_SRCS
 
 
 
-add_library(module_template SHARED
-  ${module_template_SRCS}
+add_library(mms_server SHARED
+  ${mms_server_SRCS}
 )
 
-set_target_properties(module_template PROPERTIES VERSION ${PROJECT_VERSION})
-#set_target_properties(module_template PROPERTIES PUBLIC_HEADER ../../module_interface.h)
+set_target_properties(mms_server PROPERTIES VERSION ${PROJECT_VERSION})
+#set_target_properties(mms_server PROPERTIES PUBLIC_HEADER ../../module_interface.h)
 
 
-#add_executable( module_template
-#  ${module_template_SRCS}
+#add_executable( mms_server
+#  ${mms_server_SRCS}
 #)
 
-target_link_libraries (module_template
+target_link_libraries (mms_server
+pthread
+hal
+iec61850
 )
 
-install(TARGETS module_template
+install(TARGETS mms_server
     LIBRARY DESTINATION lib ${CMAKE_INSTALL_LIBDIR}
     PUBLIC_HEADER DESTINATION include ${CMAKE_INSTALL_INCLUDEDIR})

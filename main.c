@@ -12,7 +12,8 @@
 
 //TODO
 //test function
-//other timin-scheme (interrupt)
+//log function
+//other timing-scheme (interrupt)
 
 int init_modules();
 void clean_all();
