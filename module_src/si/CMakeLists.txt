@@ -26,6 +26,14 @@ include (TestBigEndian)
 test_big_endian(PLATFORM_IS_BIGENDIAN)
 
 #include(GNUInstallDirs)
+#cmake -DCMAKE_BUILD_TYPE=Debug ..
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -ansi -pedantic")
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 include_directories(
 )
@@ -52,6 +60,7 @@ set_target_properties(SI PROPERTIES VERSION ${PROJECT_VERSION})
 #)
 
 target_link_libraries (SI
+m
 )
 
 install(TARGETS SI

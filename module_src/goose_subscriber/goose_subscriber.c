@@ -230,15 +230,17 @@ int test(void)
 
 int deinit(module_object *instance)
 {
-    printf("goose deinit\n");
+    printf("goose sub deinit\n");
     struct module_private_data * data = instance->module_data;
 
     /* Stop listening to SV messages */
     //SVReceiver_stop(data->receiver);
-    GooseReceiver_stopThreadless(data->receiver);
-
-    /* Cleanup and free resources */
-    GooseReceiver_destroy(data->receiver);
+    if(data->receiver)
+    {
+        GooseReceiver_stopThreadless(data->receiver);
+        /* Cleanup and free resources */
+        GooseReceiver_destroy(data->receiver);
+    }
 
     close(data->fd);
     close(data->fd_config);

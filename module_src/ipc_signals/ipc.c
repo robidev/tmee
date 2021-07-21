@@ -41,25 +41,27 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     //allocate module data
     struct module_private_data * data = malloc(sizeof(struct module_private_data));
 
-
-
     struct cfg_struct *config = cfg_init();
     if(cfg_load(config, instance->config_file) != 0)
     {
         printf("ERROR: could not load config file: %s\n", instance->config_file);
         return -1;
     }
+
+    data->server_address = 0;
     if(cfg_get_string(config, "server_address", &data->server_address) != 0) { return -1; }
 
     if(cfg_get_int(config,"client_count",&data->client_count) != 0) { return -1; }
-
-    data->clients = malloc(sizeof(client) * data->client_count);
+    printf("client_count = %i\n", data->client_count);
+    data->clients = malloc(sizeof(client *) * data->client_count);
     int i;
     for(i = 0; i < data->client_count; i++)
     {
+        data->clients[i]=malloc(sizeof(client));
         char input_f[256];
         sprintf(input_f,"client%d",i);
         data->clients[i]->client_address = 0;
+
         if(cfg_get_string(config, input_f, &data->clients[i]->client_address) != 0) { return -1; }
     }
 
@@ -155,15 +157,21 @@ int deinit(module_object *instance)
 {
     printf("IPC deinit\n");
     struct module_private_data * data = instance->module_data;
-    zmq_close (data->subscriber);
+
+    if(data->subscriber)
+        zmq_close (data->subscriber);
+
     free(data->server_address);
     int i;
     for(i = 0; i < data->client_count; i++)
     {
-        zmq_close (data->clients[i]->publisher);
+        if(data->clients[i]->publisher)
+            zmq_close (data->clients[i]->publisher);
         free(data->clients[i]->client_address);
+        free(data->clients[i]);
     }
-    zmq_ctx_destroy (data->context);
+    if(data->context)
+        zmq_ctx_destroy (data->context);
     free(data);
     return 0;
 }

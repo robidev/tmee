@@ -58,10 +58,11 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
 
     if(cfg_get_int(config,"element_count",&data->element_count) != 0) { return -1; }
 
-    data->elements = malloc(sizeof(element) * data->element_count);
+    data->elements = malloc(sizeof(element *) * data->element_count);
     int i;
     for(i = 0; i < data->element_count; i++)
     {
+        data->elements[i] = malloc(sizeof(element));
         char input_f[256];
         sprintf(input_f,"element%d",i);
         data->elements[i]->objectRef = 0;
@@ -72,7 +73,7 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     }
 
     //TODO calculate deadline for this module from test
-    int temp_deadline = 100;
+    int temp_deadline = 2000;
     cfg_get_int(config,"deadline",&temp_deadline);
     instance->deadline = (long)temp_deadline;
 
@@ -110,7 +111,10 @@ int init(module_object *instance, module_callbacks *callbacks)
     for(i = 0; i < data->element_count; i++)
     {
         data->elements[i]->node = IedModel_getModelNodeByShortObjectReference(data->model,data->elements[i]->objectRef);
-        IedServer_handleWriteAccess(data->iedServer, (DataAttribute *)data->elements[i]->node, writeAccessHandler, data->elements[i]);
+        if(data->elements[i]->node)
+            IedServer_handleWriteAccess(data->iedServer, (DataAttribute *)data->elements[i]->node, writeAccessHandler, data->elements[i]);
+        else
+            printf("ERROR: %s does not exist\n",data->elements[i]->objectRef);
     }
 
     /* MMS server will be instructed to start listening to client connections. */
@@ -129,12 +133,10 @@ int init(module_object *instance, module_callbacks *callbacks)
 static MmsDataAccessError
 readAccessHandler(LogicalDevice* ld, LogicalNode* ln, DataObject* dataObject, FunctionalConstraint fc, ClientConnection connection, void* parameter)
 {   
-    element * elem = parameter;
-    module_object *instance = elem->instance;
+    module_object *instance = parameter;
     struct module_private_data * data = instance->module_data;
 
-    printf("read element: %s\n", elem->objectRef);
-
+    //IedServer_updateBooleanAttributeValue(data->iedServer,)
     printf("Read access to %s/%s.%s\n", ld->name, ln->name, dataObject->name);
 
     //foreacht(registered_value in values)
@@ -165,7 +167,6 @@ writeAccessHandler (DataAttribute* dataAttribute, MmsValue* value, ClientConnect
 
 int run(module_object *instance)
 {
-    printf("run mms server\n");
     struct module_private_data * data = instance->module_data;
 
     //uint64_t timeval = Hal_getTimeInMs();
@@ -201,20 +202,24 @@ int deinit(module_object *instance)
 {
     printf("mms deinit\n");
     struct module_private_data * data = instance->module_data;
+    if(data->iedServer)
+    {
+        /* stop MMS server - close TCP server socket and all client sockets */
+        IedServer_stopThreadless(data->iedServer);
+        /* Cleanup - free all resources */
+        IedServer_destroy(data->iedServer);
+    }
+    if(data->model)
+        IedModel_destroy(data->model);
 
     int i;
     for(i = 0; i < data->element_count; i++)
     {
         free(data->elements[i]->objectRef);
+        free(data->elements[i]);
     }
     free(data->elements);
     free(data->config_file);
-    /* stop MMS server - close TCP server socket and all client sockets */
-    IedServer_stopThreadless(data->iedServer);
-    IedModel_destroy(data->model);
-    /* Cleanup - free all resources */
-    IedServer_destroy(data->iedServer);
-
     free(data);
     return 0;
 }

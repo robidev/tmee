@@ -149,10 +149,11 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
     cfg_get_int(config,"deadline",&temp_deadline);
     instance->deadline = (long)temp_deadline;
 
-    data->inputs = malloc(sizeof(data_inputs) * data->input_count);
+    data->inputs = malloc(sizeof(data_inputs *) * data->input_count);
     int i;
     for(i = 0; i < data->input_count; i++)
     {
+        data->inputs[i]=malloc(sizeof(data_inputs));
         char input_f[256];
         sprintf(input_f,"input_file%d",i);
         data->inputs[i]->filename = 0;
@@ -179,7 +180,7 @@ int init(module_object *instance, module_callbacks *callbacks)
         data->inputs[i]->fd = open(data->inputs[i]->filename, O_RDWR, S_IRUSR );
         if (data->inputs[i]->fd < 0)
         {
-            perror("open");
+            perror(data->inputs[i]->filename);
             return -10;
         }
         
@@ -286,6 +287,7 @@ int deinit(module_object *instance)
     {
         free(data->inputs[i]->filename);
         munmap(data->inputs[i]->buffer,data->inputs[i]->buffer_size);
+        free(data->inputs[i]);
     }
     free(data->inputs);
 

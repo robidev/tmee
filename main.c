@@ -279,6 +279,7 @@ int main(int argc, char ** argv)
     free(logfile);
     cfg_free(config);
 
+    printf("\n--- finished ---\n");
     return 0;
 }
 
@@ -457,7 +458,7 @@ void run_asap()
             long end = current_time();
             if(end - start > module->deadline)
             {
-                printf("ERROR: module deadline(%li) overshot by %li\n",module->deadline, (end - start) - module->deadline);
+                printf("ERROR: module '%s' deadline(%li) overshot by %li\n",module->config_id, module->deadline, (end - start) - module->deadline);
             }
             profile(module->config_id,start,end);//log timing of this run
         }
@@ -498,7 +499,7 @@ void run_deadline(long interval)
                 long end = current_time();
                 if(end - start > module->deadline)
                 {
-                    printf("ERROR: module deadline(%li) overshot by %li\n",module->deadline, (end - start) - module->deadline);
+                    printf("ERROR: module '%s' deadline(%li) overshot by %li\n",module->config_id, module->deadline, (end - start) - module->deadline);
                 }
                 profile(module->config_id,start,end);//log timing of this run
             }
