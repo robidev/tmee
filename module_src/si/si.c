@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
-#include <sys/time.h>
+#include <time.h>
 
 #define likely(x)      __builtin_expect(!!(x), 1)
 #define unlikely(x)    __builtin_expect(!!(x), 0)
@@ -51,9 +51,9 @@ const char event_id[] = "TRIP_VALUE_CHANGE";
 
 long current_time()
 {
-    struct timeval timecheck;
-    gettimeofday(&timecheck, NULL);
-    return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
+    struct timespec x;
+    clock_gettime(CLOCK_MONOTONIC, &x);
+    return (long) (x.tv_sec * 1000000 + x.tv_nsec/1000);
 }
 
 int pre_init(module_object *instance, module_callbacks *callbacks)

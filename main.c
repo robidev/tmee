@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
-#include <sys/time.h>
+//#include <sys/time.h>
+#include <time.h>
 #include <sys/queue.h> //http://infnis.wikidot.com/list-from-sys-queue-h
 #include <string.h>
 #include <signal.h>
@@ -432,11 +433,18 @@ int run_callback_func(int event_id)
     return 0;
 }
 
-long current_time()
+/*long current_time()
 {
     struct timeval timecheck;
     gettimeofday(&timecheck, NULL);
     return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
+}*/
+
+long current_time()
+{
+    struct timespec x;
+    clock_gettime(CLOCK_MONOTONIC, &x);
+    return (long) (x.tv_sec * 1000000 + x.tv_nsec/1000);
 }
 
 void run_asap()

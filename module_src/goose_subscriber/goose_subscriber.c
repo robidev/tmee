@@ -174,15 +174,24 @@ int init(module_object *instance, module_callbacks *callbacks)
     GooseReceiver_setInterfaceId(data->receiver, data->interface);
 
     sprintf(bb, "eth=%s\nshm name=%s\n",data->interface, data->shm_name);
-    write(data->fd_config, bb, strlen(bb));    
+    if(write(data->fd_config, bb, strlen(bb)) < strlen(bb) )
+    {
+        printf("ERROR: could not write to %s_config\n", data->shm_name);
+    }
 
     if( data->dstMac != NULL)
     {
         sprintf(bb, "mac=%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",data->MAC[0],data->MAC[1],data->MAC[2],data->MAC[3],data->MAC[4],data->MAC[5]);
-        write(data->fd_config, bb, strlen(bb)); 
+        if(write(data->fd_config, bb, strlen(bb)) < strlen(bb) )
+        {
+            printf("ERROR: could not write to %s_config\n", data->shm_name);
+        }
     }
     sprintf(bb, "appid=%.4x\n",data->appid);
-    write(data->fd_config, bb, strlen(bb));  
+    if(write(data->fd_config, bb, strlen(bb)) < strlen(bb) )
+    {
+        printf("ERROR: could not write to %s_config\n", data->shm_name);
+    }  
 
     /* Create a subscriber listening to SV messages with APPID 0x-xxxx */
     data->subscriber = GooseSubscriber_create(data->goCbRef, NULL);
