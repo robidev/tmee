@@ -102,7 +102,7 @@ int init(module_object *instance, module_callbacks *callbacks)
         rc = zmq_connect (data->clients[i]->publisher, data->clients[i]->client_address);
         if(rc != 0) return -1;
     }
-
+    printf("IPC init done\n");
     return 0;
 }
 

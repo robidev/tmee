@@ -246,6 +246,7 @@ int deinit(module_object *instance)
 static void
 svUpdateListener (SVSubscriber subscriber, void* parameter, SVSubscriber_ASDU asdu)
 {
+    //printf("s\n");
     module_object *instance = parameter;
     struct module_private_data * data = instance->module_data;
 

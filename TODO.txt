@@ -2,12 +2,10 @@ engine:
   implement deadline-benchmarks and code-cov testing
   implement fast logging
 
-core modules:
-  implement mms_server read/write for file-backend
-
 python:
-  write lib60870 perhiperal(controller vs perhiperal) python example (zmq and file support, map IOA on files)
-
+  write lib60870 perhiperal(controller vs perhiperal) python example (map IOA on files)
 
 backlog:
-  improve goose subscriber in c to allow writing to multiple files
+  implement mms_server read/write more types then int32
+  improve GOOSE subscriber, to split off received data in 1 file per mmsvalue
+  improve SI module for more channels

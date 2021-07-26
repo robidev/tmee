@@ -1,5 +1,6 @@
 import struct
 import sys
+import time
 
 #https://docs.python.org/3/library/struct.html
 
@@ -45,27 +46,37 @@ def type_to_item_size(type):
     return switch.get(type,"unknown")
 
 
-def read_size(file):
+def read_size_file(file):
     file.seek(SIZE_POS, 0)
     return int(struct.unpack('i', file.read(4))[0])
 
+def read_size(buffer):
+    return int(struct.unpack('i', buffer[0:ITEMS_POS])[0])
 
-def read_items(file):
+def read_items_file(file):
     file.seek(ITEMS_POS, 0)
     return int(struct.unpack('i', file.read(4))[0])
 
+def read_items(buffer):
+    return int(struct.unpack('i', buffer[ITEMS_POS:INDEX_POS])[0])
 
-def read_index(file):
+def read_index_file(file):
     file.seek(INDEX_POS, 0)
     return int(struct.unpack('i', file.read(4))[0])
 
+def read_index(buffer):
+    return int(struct.unpack('i', buffer[INDEX_POS:TYPE_POS])[0])
 
-def read_type(file):
+
+def read_type_file(file):
     file.seek(TYPE_POS, 0)
     return int(struct.unpack('h', file.read(2))[0])
 
+def read_type(buffer):
+    return int(struct.unpack('h', buffer[TYPE_POS:SEMAPHORE_POS])[0])
 
-def lock_buffer(file, spin):
+
+def lock_buffer_file(file, spin):
     old = file.tell()
     file.seek(SEMAPHORE_POS, 0)
     if spin == False:
@@ -82,7 +93,18 @@ def lock_buffer(file, spin):
     return 0
 
 
-def free_buffer_lock(file):
+def lock_buffer(buffer, spin):
+    if spin == False:
+        if buffer[SEMAPHORE_POS] == 1:
+            return -1
+    else:
+        while buffer[SEMAPHORE_POS] == 1: #wait loop
+            time.sleep(0.000001)
+    buffer[SEMAPHORE_POS] = 1
+    return 0
+
+
+def free_buffer_lock_file(file):
     old = file.tell()
     file.seek(SEMAPHORE_POS, 0)
     if file.read(1) == 0:
@@ -93,6 +115,14 @@ def free_buffer_lock(file):
     file.write( bytes(0) )
     file.seek(old,0)
     return 0
+
+
+def free_buffer_lock(buffer):
+    if buffer[SEMAPHORE_POS] == 0:
+        return -1
+    buffer[SEMAPHORE_POS] = 0
+    return 0
+
 
 
 def read_input_bool(file, index):
@@ -276,19 +306,21 @@ def read_current_input_int32(file):
     return read_input_int32(file, index)
 
 
-#testing
-file = open("/dev/shm/smv92.mem", "r+b")
-size = read_size(file)
-items = read_items(file)
-index = read_index(file)
-type = read_type(file)
-print("size=%i, items=%i, index=%i, type=%i" % (size,items, index, type))
 
-result = lock_buffer(file,True)
-print("lock result= %i" % result)
-result = free_buffer_lock(file)
-print("unlock result= %i" % result)
+if __name__ == "__main__":
+    #testing
+    file = open("/dev/shm/smv92.mem", "r+b")
+    size = read_size(file)
+    items = read_items(file)
+    index = read_index(file)
+    type = read_type(file)
+    print("size=%i, items=%i, index=%i, type=%i" % (size,items, index, type))
 
-print("done")
+    result = lock_buffer(file,True)
+    print("lock result= %i" % result)
+    result = free_buffer_lock(file)
+    print("unlock result= %i" % result)
+
+    print("done")
 
 

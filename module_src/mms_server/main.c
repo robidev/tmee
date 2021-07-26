@@ -6,13 +6,28 @@
 #include <string.h>
 #include "../../module_interface.h"
 #include "cfg_parse.h"
+#include "mem_file.h"
 #include "types.h"
+
+#include <signal.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 
 typedef struct _element {
     char * objectRef;
     ModelNode * node;
+    ModelNode * Objnode;
     module_object *instance;
+
+    char * filename;
+    int fd;
+    char * buffer;
+    int buffer_size;
+    int item_size;
+    int max_items;
 } element;
 
 struct module_private_data {
@@ -68,8 +83,13 @@ int pre_init(module_object *instance, module_callbacks *callbacks)
         data->elements[i]->objectRef = 0;
         if(cfg_get_string(config, input_f, &data->elements[i]->objectRef) != 0) { return -1; }
 
+        sprintf(input_f,"element%d_file",i);
+        data->elements[i]->filename = 0;
+        if(cfg_get_string(config, input_f, &data->elements[i]->filename) != 0) { return -1; }
         //for state reference in callbacks
         data->elements[i]->instance = instance;
+        data->elements[i]->node = 0;
+        data->elements[i]->Objnode = 0;
     }
 
     //TODO calculate deadline for this module from test
@@ -110,9 +130,36 @@ int init(module_object *instance, module_callbacks *callbacks)
     int i;
     for(i = 0; i < data->element_count; i++)
     {
-        data->elements[i]->node = IedModel_getModelNodeByShortObjectReference(data->model,data->elements[i]->objectRef);
+        data->elements[i]->node = IedModel_getModelNodeByObjectReference(data->model,data->elements[i]->objectRef);
         if(data->elements[i]->node)
+        {
+            data->elements[i]->Objnode = data->elements[i]->node->parent;
             IedServer_handleWriteAccess(data->iedServer, (DataAttribute *)data->elements[i]->node, writeAccessHandler, data->elements[i]);
+
+            remove(data->elements[i]->filename);//remove existing file to prevent a permission error
+            data->elements[i]->fd = open(data->elements[i]->filename, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);//perm: 644
+            if (data->elements[i]->fd < 0)
+            {
+                perror(data->elements[i]->filename);
+                return -10;
+            }
+            data->elements[i]->item_size = type_to_item_size(INT32);
+            data->elements[i]->max_items = 10;
+
+            data->elements[i]->buffer_size = calculate_buffer_size(data->elements[i]->item_size, data->elements[i]->max_items);
+                // allocate size in file
+            if(ftruncate(data->elements[i]->fd, data->elements[i]->buffer_size + 10) != 0) 
+            {
+                printf("ERROR: ftruncate issue\n");
+                return -20;
+            }
+            
+            data->elements[i]->buffer = mmap_fd_write(data->elements[i]->fd, data->elements[i]->buffer_size);
+            write_size(data->elements[i]->buffer,data->elements[i]->item_size);
+            write_items(data->elements[i]->buffer,data->elements[i]->max_items);
+            write_index(data->elements[i]->buffer,0);
+            write_type(data->elements[i]->buffer, INT32);
+        }
         else
             printf("ERROR: %s does not exist\n",data->elements[i]->objectRef);
     }
@@ -138,11 +185,20 @@ readAccessHandler(LogicalDevice* ld, LogicalNode* ln, DataObject* dataObject, Fu
 
     //IedServer_updateBooleanAttributeValue(data->iedServer,)
     printf("Read access to %s/%s.%s\n", ld->name, ln->name, dataObject->name);
-
-    //foreacht(registered_value in values)
-    //if element==registered_value
-    //  get info from file, and write into model
-    //
+    int i;
+    for(i = 0; i < data->element_count; i++)
+    {
+        if(data->elements[i]->node == (ModelNode *)dataObject)
+        {
+            //TODO other types of data
+            int val = read_current_input_int32(data->elements[i]->buffer);
+            printf("read val=%i\n",val);
+            //  get info from file, and write into model, jut before we need it
+            IedServer_lockDataModel(data->iedServer);
+            IedServer_updateInt32AttributeValue(data->iedServer,(DataAttribute *)data->elements[i]->node,val);
+            IedServer_unlockDataModel(data->iedServer);
+        }
+    }
     return DATA_ACCESS_ERROR_SUCCESS;
 }
 
@@ -156,29 +212,22 @@ writeAccessHandler (DataAttribute* dataAttribute, MmsValue* value, ClientConnect
 
     printf("write element: %s\n", elem->objectRef);
 
-    //foreacht(registered_value in values)
-    //if element==registered_value
-    //  write data into file
-    //  update model
-    //
-    return DATA_ACCESS_ERROR_OBJECT_ACCESS_DENIED;
+    //TODO: support other types, match mmsvalue with filetype
+    int val = MmsValue_toInt32(value);
+    printf("write val: %i\n",val);
+    write_output_int(elem->buffer,val);
+
+    return DATA_ACCESS_ERROR_SUCCESS;//DATA_ACCESS_ERROR_OBJECT_ACCESS_DENIED;
 }
 
 
 int run(module_object *instance)
 {
     struct module_private_data * data = instance->module_data;
-
-    //uint64_t timeval = Hal_getTimeInMs();
-    //IedServer_lockDataModel(data->iedServer);
-    //IedServer_unlockDataModel(data->iedServer);
-
     /* Has to be called whenever the TCP stack receives data */
     IedServer_processIncomingData(data->iedServer);
-
     /* Has to be called periodically */
     IedServer_performPeriodicTasks(data->iedServer);
-
 
     return 0;
 }
@@ -188,6 +237,22 @@ int event(module_object *instance, int event_id)
 {
     printf("mms event %i\n", event_id);
     struct module_private_data * data = instance->module_data;
+    int i;
+
+    //process a data-update, if triggered
+    for(i = 0; i < data->element_count; i++)
+    {
+        if(data->elements[i]->node != 0)
+        {
+            //TODO other types of data
+            int val = read_current_input_int32(data->elements[i]->buffer);
+            printf("read val=%i\n",val);
+            //  get info from file, and write into model, jut before we need it
+            IedServer_lockDataModel(data->iedServer);
+            IedServer_updateInt32AttributeValue(data->iedServer,(DataAttribute *)data->elements[i]->node,val);
+            IedServer_unlockDataModel(data->iedServer);
+        }
+    }
     return 0;
 }
 
