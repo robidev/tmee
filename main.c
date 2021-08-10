@@ -9,6 +9,10 @@
 #include "cfg_parse.h"
 #include "module_interface.h"
 
+#include <xpedite/framework/Framework.H>
+#include <xpedite/framework/Probes.H>
+#include <xpedite/framework/Options.H>
+
 #define MAX_EVENT_IDS 100
 
 //TODO
@@ -56,9 +60,29 @@ void sigint_handler(int signalId)
     running = 0;
 }
 
+/*long current_time()
+{
+    struct timeval timecheck;
+    gettimeofday(&timecheck, NULL);
+    return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
+}*/
+long current_time()
+{
+    struct timespec x;
+    clock_gettime(CLOCK_MONOTONIC, &x);
+    return (long) (x.tv_sec * 1000000 + x.tv_nsec/1000);
+}
+
 
 int main(int argc, char ** argv)
 {
+    const xpedite::framework::Options options = {xpedite::framework::AWAIT_PROFILE_BEGIN};
+    if(!xpedite::framework::initialize("/tmp/xpedite-appinfo.txt", options)) 
+    { 
+        throw std::runtime_error {"failed to init xpedite"}; 
+    }
+
+
     char *config_file = "config/main_config.ini";
     int modules = 0;
     for(int i = 0; i< MAX_EVENT_IDS; i++)
@@ -433,28 +457,17 @@ int run_callback_func(int event_id)
     return 0;
 }
 
-/*long current_time()
-{
-    struct timeval timecheck;
-    gettimeofday(&timecheck, NULL);
-    return (long)timecheck.tv_sec * 1000000 + (long)timecheck.tv_usec;
-}*/
 
-long current_time()
-{
-    struct timespec x;
-    clock_gettime(CLOCK_MONOTONIC, &x);
-    return (long) (x.tv_sec * 1000000 + x.tv_nsec/1000);
-}
 
 void run_asap()
 {
     while(running)
     {
+    XPEDITE_TXN_SCOPE(Life);
         long start_time = current_time();
         module_object * module;
         LIST_FOREACH(module, &registered_modules, next)
-        {
+        {   XPEDITE_PROBE(CodeBegin);
             if(module->run_enabled == 0)
                 continue;
                     
@@ -471,6 +484,7 @@ void run_asap()
             profile(module->config_id,start,end);//log timing of this run
         }
         profile("--- overall ---",start_time, current_time());//log whole run time
+        XPEDITE_PROBE(SleepBegin);
     }
 }
 
@@ -487,10 +501,11 @@ void run_deadline(long interval)
     long next_deadline = interval + current_time();
 
     while(running)
-    {
+    {      
+    XPEDITE_TXN_SCOPE(Life);
         long start_time = current_time();
         if(start_time >= next_deadline)
-        {
+        {   XPEDITE_PROBE(CodeBegin);
             next_deadline += interval;
 
             module_object * module;
@@ -526,7 +541,7 @@ void run_deadline(long interval)
                     spare += interval;
                     deadlines_skipped++; //global stats counter for deadlines skipped
                 }
-            }
+            }XPEDITE_PROBE(SleepBegin);
         }
     } 
 }

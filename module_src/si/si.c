@@ -259,7 +259,31 @@ int event(module_object *instance, int event_id)
 //called to generate real-time performance metrics on this machine
 int test(void)
 {
-    printf("SI test\n");
+    //instance
+    //instance->data
+    //data->input_buffer (index,.,.)
+    //data->old_index 
+    //data->vector
+    //data->total
+    //data->sample_count
+    //data->start_time
+    //data->param_a
+    //data->param_b
+    //data->callbacks (->callback_event_cb(data->trip_value_changed_id);
+    //data->trip_value_changed_id
+    //data->output_buffer
+    //
+    //mock read_input_smv? or mock-file
+    //mock read_index or mock-file
+    //mock write_output_bool
+
+    //
+    //
+    //data->is_recording = 1/0
+    //match index<>old_index (same, -1,-2,-3,-4,-5)
+    //data->trip = 1/0
+    //foreach option
+    //  call event(module_object *instance, int event_id)
     return 0;
 }
 
